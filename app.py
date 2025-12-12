@@ -42,10 +42,10 @@ if 'custo_produto_final' not in st.session_state:
     st.session_state['custo_produto_final'] = 99.00
 if 'detalhes_custo' not in st.session_state:
     st.session_state['detalhes_custo'] = {
-        'preco_medio': 99.00, 'credito_icms_total': 0.0, 
+        'preco_medio': 00.00, 'credito_icms_total': 0.0, 
         'credito_pis': 0.0, 'credito_cofins': 0.0, 
         'pis_rate': 1.65, 'cofins_rate': 7.60, 
-        'fornecedor_base': 99.00
+        'fornecedor_base': 00.00
     }
 
 # --- SIDEBAR - CONFIGURAÇÕES GERAIS ---
@@ -134,7 +134,7 @@ def configurar_tributos():
     st.divider()
     
     c1, c2 = st.columns(2)
-    preco_compra = c1.number_input("Preço de Compra ($)", value=100.00, step=1.0)
+    preco_compra = c1.number_input("Preço de Compra ($)", value=00.00, step=1.0)
     frete_rateio = c2.number_input("Frete (Rateio) ($)", value=0.00, step=0.5)
     
     c3, c4 = st.columns(2)
@@ -156,7 +156,7 @@ def configurar_tributos():
     if lucro_real:
         st.caption("Créditos Tributários")
         col_i1, col_i2 = st.columns(2)
-        icms_frete_pct = col_i1.number_input("ICMS Frete (%)", value=12.0, step=0.5)
+        icms_frete_pct = col_i1.number_input("ICMS Frete (%)", value=00.0, step=0.5)
         disabled_icms_prod = (icms_st > 0)
         val_default_icms = 0.0 if disabled_icms_prod else 12.0
         icms_prod_pct = col_i2.number_input("ICMS Produto (%)", value=val_default_icms, step=0.5, disabled=disabled_icms_prod)
@@ -211,7 +211,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("💸 Tributos Venda")
     c_v1, c_v2 = st.columns(2)
-    icms_venda_pct = c_v1.number_input("🏛️ ICMS (%)", value=18.00, step=0.5, format="%.2f")
+    icms_venda_pct = c_v1.number_input("🏛️ ICMS (%)", value=00.00, step=0.5, format="%.2f")
     difal_pct = c_v2.number_input("🌍 DIFAL (%)", value=0.00, step=0.5, format="%.2f") 
 
     st.markdown("---")
@@ -220,7 +220,7 @@ with st.sidebar:
     help_text_armaz = "Calculado sobre CUSTO DO PRODUTO (Full Ativo) ou PREÇO VENDA (Full Inativo)"
     
     col_log1, col_log2 = st.columns(2)
-    peso_input = col_log1.number_input("⚖️ Peso (Kg)", value=0.30, step=0.10, format="%.2f")
+    peso_input = col_log1.number_input("⚖️ Peso (Kg)", value=0.00, step=0.10, format="%.2f")
     armazenagem_pct = col_log2.number_input("📦 Armaz. (%)", value=0.0, step=0.1, format="%.2f", help=help_text_armaz)
 
 # --- FUNÇÃO HELPER: CONSULTAR TABELA ML ---
@@ -420,3 +420,4 @@ else:
                 st.markdown(f'<div class="big-price">R$ {res_u["preco"]:.2f}</div>', unsafe_allow_html=True)
             st.markdown(render_card_html(res_u["detalhes"], comissao_u, "ICMS"), unsafe_allow_html=True)
             st.markdown(f"""<div class="result-box"><div class="lucro-label">Lucro Líquido (Margem Real: {res_u['margem']:.1f}%)</div><div class="lucro-valor">⬆ R$ {res_u['lucro']:.2f}</div></div>""", unsafe_allow_html=True)
+
