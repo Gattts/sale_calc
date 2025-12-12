@@ -41,11 +41,10 @@ TABELA_FRETE_ML = {
 if 'custo_produto_final' not in st.session_state:
     st.session_state['custo_produto_final'] = 99.00
 if 'detalhes_custo' not in st.session_state:
-    # Adicionei pis_rate e cofins_rate padrões
     st.session_state['detalhes_custo'] = {
         'preco_medio': 99.00, 'credito_icms_total': 0.0, 
         'credito_pis': 0.0, 'credito_cofins': 0.0, 
-        'pis_rate': 1.65, 'cofins_rate': 7.60, # Taxas padrão
+        'pis_rate': 1.65, 'cofins_rate': 7.60, 
         'fornecedor_base': 99.00
     }
 
@@ -182,7 +181,7 @@ def configurar_tributos():
         detalhes_to_save = {
             'preco_medio': preco_compra_medio, 'credito_icms_total': total_credito_icms,
             'credito_pis': credito_pis, 'credito_cofins': credito_cofins, 
-            'pis_rate': pis_pct, 'cofins_rate': cofins_pct, # SALVANDO TAXAS PARA USAR NA VENDA
+            'pis_rate': pis_pct, 'cofins_rate': cofins_pct,
             'fornecedor_base': preco_compra
         }
         st.success(f"Custo Final Calculado: R$ {custo_final:.2f}")
@@ -244,22 +243,19 @@ def obter_frete_ml(preco, peso):
     return frete_encontrado
 
 
-# --- FUNÇÃO DE CÁLCULO GERAL (ATUALIZADA) ---
+# --- FUNÇÃO DE CÁLCULO GERAL ---
 def calcular_cenario(margem_alvo, preco_venda_manual, comissao_pct, modo_calculo, canal_atual):
     custo_final_produto = st.session_state['custo_produto_final']
     detalhes_entrada = st.session_state['detalhes_custo']
     
-    # 1. Recuperar Taxas
     icms_rate = icms_venda_pct / 100
     difal_rate = difal_pct / 100
-    pis_rate = detalhes_entrada.get('pis_rate', 0.0165 if detalhes_entrada.get('pis_rate') is None else detalhes_entrada.get('pis_rate')) / 100
-    cofins_rate = detalhes_entrada.get('cofins_rate', 0.0760 if detalhes_entrada.get('cofins_rate') is None else detalhes_entrada.get('cofins_rate')) / 100
+    pis_rate = details_pis_rate = detalhes_entrada.get('pis_rate', 1.65) / 100
+    cofins_rate = details_cofins_rate = detalhes_entrada.get('cofins_rate', 7.60) / 100
     
-    # 2. Calcular Carga Tributária Efetiva sobre o PREÇO BRUTO
-    # Base PIS/COFINS = 1 - ICMS. Logo o imposto efetivo é (1-ICMS) * Aliquota
+    # 2. Calcular Carga Tributária Efetiva
     pis_efetivo = (1 - icms_rate) * pis_rate
     cofins_efetivo = (1 - icms_rate) * cofins_rate
-    
     total_impostos_pct = icms_venda_pct + difal_pct + (pis_efetivo * 100) + (cofins_efetivo * 100)
     
     frete_aplicado = 0.0
@@ -281,7 +277,6 @@ def calcular_cenario(margem_alvo, preco_venda_manual, comissao_pct, modo_calculo
         else:
             frete_temp = 0.0
             for _ in range(3):
-                # Divisor considera a carga tributária total calculada acima
                 divisor = 1 - ((total_impostos_pct + comissao_pct + taxa_armaz_variavel + margem_alvo) / 100)
                 if divisor <= 0: divisor = 0.01
                 numerador = custo_final_produto + frete_temp + taxa_fixa_extra + custo_armaz_fixo
@@ -299,29 +294,22 @@ def calcular_cenario(margem_alvo, preco_venda_manual, comissao_pct, modo_calculo
     else: 
         preco_final = preco_venda_manual
         val_armaz_variavel = preco_final * (taxa_armaz_variavel / 100)
-        
-        # Custos variáveis agora usam o total_impostos_pct correto
         custos_variaveis_val = preco_final * ((total_impostos_pct + comissao_pct) / 100)
         custos_fixos_totais = frete_aplicado + taxa_fixa_extra + custo_final_produto + custo_armaz_fixo + val_armaz_variavel
-        
         lucro_bruto = preco_final - custos_variaveis_val - custos_fixos_totais
         margem_real = (lucro_bruto / preco_final) * 100 if preco_final > 0 else 0
 
     # 5. Detalhamento Absoluto
     val_icms = preco_final * icms_rate
     val_difal = preco_final * difal_rate
-    
-    # Base de cálculo PIS/COFINS = Preço - ICMS
     base_pis_cofins = preco_final - val_icms
     val_pis = base_pis_cofins * pis_rate
     val_cofins = base_pis_cofins * cofins_rate
-    
     val_impostos_total = val_icms + val_difal + val_pis + val_cofins
     
     val_comissao = preco_final * (comissao_pct / 100)
     val_armazenagem_final = custo_armaz_fixo if is_fulfillment else (preco_final * (taxa_armaz_variavel / 100))
     val_marketplace_total = val_comissao + frete_aplicado + taxa_fixa_extra + val_armazenagem_final
-    
     val_lucro = preco_final - val_impostos_total - val_marketplace_total - custo_final_produto
     
     return {
@@ -329,8 +317,8 @@ def calcular_cenario(margem_alvo, preco_venda_manual, comissao_pct, modo_calculo
         "detalhes": {
             "impostos_venda_total": val_impostos_total, 
             "val_icms": val_icms, "val_difal": val_difal,
-            "val_pis": val_pis, "val_cofins": val_cofins, "pis_rate_used": pis_rate*100, "cofins_rate_used": cofins_rate*100,
-            
+            "val_pis": val_pis, "val_cofins": val_cofins, 
+            "pis_rate_used": details_pis_rate*100, "cofins_rate_used": details_cofins_rate*100,
             "mkt_total": val_marketplace_total, "mkt_comissao": val_comissao, "mkt_frete": frete_aplicado, 
             "mkt_taxa_extra": taxa_fixa_extra, "mkt_armazenagem": val_armazenagem_final,
             "custo_prod_total": custo_final_produto, "preco_medio": detalhes_entrada.get('preco_medio', 0),
@@ -339,19 +327,20 @@ def calcular_cenario(margem_alvo, preco_venda_manual, comissao_pct, modo_calculo
         }
     }
 
-# --- HELPER HTML ---
+# --- HELPER HTML (FIXED) ---
 def render_card_html(d, comissao, nome_icms):
     difal_row = f'<div class="sub-row"><span>DIFAL ({difal_pct}%)</span> <span>R$ {d["val_difal"]:.2f}</span></div>' if d['val_difal'] > 0 else ""
     
-    # Linhas de PIS/COFINS Venda
     pis_row = ""
     if d['val_pis'] > 0:
         pis_row = f'<div class="sub-row"><span>PIS ({d["pis_rate_used"]:.2f}%)</span> <span>R$ {d["val_pis"]:.2f}</span></div>'
+    
     cofins_row = ""
     if d['val_cofins'] > 0:
         cofins_row = f'<div class="sub-row"><span>COFINS ({d["cofins_rate_used"]:.2f}%)</span> <span>R$ {d["val_cofins"]:.2f}</span></div>'
 
     taxa_extra_row = f'<div class="sub-row"><span>Taxa Fixa</span> <span>R$ {d["mkt_taxa_extra"]:.2f}</span></div>' if d.get('mkt_taxa_extra', 0) > 0 else ""
+    
     armazenagem_row = ""
     if d.get('mkt_armazenagem', 0) > 0:
         base_calc = "Custo" if is_fulfillment else "Venda"
@@ -361,29 +350,9 @@ def render_card_html(d, comissao, nome_icms):
     if d['credito_icms'] > 0: creditos_html += f'<div class="credit-row"><span>• Crédito ICMS</span> <span>- R$ {d["credito_icms"]:.2f}</span></div>'
     if d['credito_pis'] > 0: creditos_html += f'<div class="credit-row"><span>• Crédito PIS</span> <span>- R$ {d["credito_pis"]:.2f}</span></div>'
     if d['credito_cofins'] > 0: creditos_html += f'<div class="credit-row"><span>• Crédito COFINS</span> <span>- R$ {d["credito_cofins"]:.2f}</span></div>'
-        
-    return f"""
-<div class="custom-accordion">
-<details>
-<summary><span>(-) Impostos Venda</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['impostos_venda_total']:.2f}</span></summary>
-<div class="details-content">
-    <div class="sub-row"><span>{nome_icms} ({icms_venda_pct}%)</span> <span>R$ {d['val_icms']:.2f}</span></div>
-    {difal_row}
-    {pis_row}
-    {cofins_row}
-</div>
-</details>
-<details>
-<summary><span>(-) Custos Marketplace</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['mkt_total']:.2f}</span></summary>
-<div class="details-content"><div class="sub-row"><span>Comissão ({comissao}%)</span> <span>R$ {d['mkt_comissao']:.2f}</span></div><div class="sub-row"><span>Frete</span> <span>R$ {d['mkt_frete']:.2f}</span></div>{taxa_extra_row}{armazenagem_row}</div>
-</details>
-<details>
-<summary><span>(-) Custo Produto Final</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['custo_prod_total']:.2f}</span></summary>
-<div class="details-content"><div class="sub-row"><span>Preço Compra Médio</span> <span>R$ {d['preco_medio']:.2f}</span></div>
-<div style="margin-top: 5px; border-top: 1px dashed var(--border-color); padding-top:4px;"><span style="font-size:0.9em; color: var(--text-muted);">Abatimentos Fiscais:</span>{creditos_html}</div></div>
-</details>
-</div>
-"""
+    
+    # IMPORTANTE: String HTML sem indentação para evitar bug do Markdown
+    return f"""<div class="custom-accordion"><details><summary><span>(-) Impostos Venda</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['impostos_venda_total']:.2f}</span></summary><div class="details-content"><div class="sub-row"><span>{nome_icms} ({icms_venda_pct}%)</span> <span>R$ {d['val_icms']:.2f}</span></div>{difal_row}{pis_row}{cofins_row}</div></details><details><summary><span>(-) Custos Marketplace</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['mkt_total']:.2f}</span></summary><div class="details-content"><div class="sub-row"><span>Comissão ({comissao}%)</span> <span>R$ {d['mkt_comissao']:.2f}</span></div><div class="sub-row"><span>Frete</span> <span>R$ {d['mkt_frete']:.2f}</span></div>{taxa_extra_row}{armazenagem_row}</div></details><details><summary><span>(-) Custo Produto Final</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['custo_prod_total']:.2f}</span></summary><div class="details-content"><div class="sub-row"><span>Preço Compra Médio</span> <span>R$ {d['preco_medio']:.2f}</span></div><div style="margin-top: 5px; border-top: 1px dashed var(--border-color); padding-top:4px;"><span style="font-size:0.9em; color: var(--text-muted);">Abatimentos Fiscais:</span>{creditos_html}</div></div></details></div>"""
 
 # --- LAYOUT PRINCIPAL ---
 nome_canal_titulo = canal.split(' ', 1)[1] if ' ' in canal else canal
