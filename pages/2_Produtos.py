@@ -4,6 +4,14 @@ from sqlalchemy import create_engine, text
 
 st.set_page_config(page_title="Histórico de Compras", page_icon="🛍️", layout="wide")
 
+st.markdown("""
+<style>
+    .block-container { padding-top: 1.5rem !important; }
+    .label-info { font-size: 14px; color: #555; font-weight: bold; }
+    .value-info { font-size: 18px; color: #000; }
+</style>
+""", unsafe_allow_html=True)
+
 # ==============================================================================
 # 1. CONEXÃO AWS
 # ==============================================================================
@@ -17,12 +25,14 @@ def get_engine():
     return create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
 
 def carregar_historico():
-    """Busca TODO o histórico ordenado da compra mais recente para a mais antiga"""
+    """Busca histórico fazendo JOIN com fornecedor"""
     query = """
-        SELECT id, sku, nome, nro_nf, data_compra, quantidade, 
-               preco_partida, ipi_percent, icms_percent, preco_final
-        FROM produtos 
-        ORDER BY data_compra DESC, id DESC
+        SELECT p.id, p.sku, p.nome, p.nro_nf, p.data_compra, p.quantidade, 
+               p.preco_partida, p.ipi_percent, p.icms_percent, p.preco_final,
+               COALESCE(c.fornecedor, 'Não Identificado') as fornecedor
+        FROM produtos p
+        LEFT JOIN contas_pagar c ON p.nro_nf = c.nro_documento
+        ORDER BY p.data_compra DESC, p.id DESC
     """
     try:
         engine = get_engine()
@@ -36,89 +46,84 @@ def carregar_historico():
 # 2. INTERFACE
 # ==============================================================================
 st.title("🛍️ Histórico de Compras")
-st.caption("Consulte as últimas entradas, custos e impostos pagos por produto.")
 
-# Botão de atualização
-if st.button("🔄 Atualizar Dados"):
+# Botão de refresh e Filtros
+col_refresh, col_filter = st.columns([1, 4])
+if col_refresh.button("🔄 Atualizar"):
     st.cache_data.clear()
     st.rerun()
 
 df = carregar_historico()
 
 if not df.empty:
-    # --- BARRA DE BUSCA ---
-    busca = st.text_input("🔍 Buscar Produto (Nome ou SKU)", placeholder="Digite para filtrar...")
+    # --- FILTROS ---
+    col_f1, col_f2 = st.columns(2)
+    
+    # 1. Busca por Texto
+    busca = col_f1.text_input("🔍 Buscar Produto (Nome ou SKU)", placeholder="Digite para filtrar...")
+    
+    # 2. Filtro de Fornecedor
+    lista_fornecedores = sorted(df['fornecedor'].unique())
+    filtro_fornecedor = col_f2.multiselect("🏢 Filtrar por Fornecedor", options=lista_fornecedores)
+
+    # Aplica Filtros
+    df_filtrado = df.copy()
     
     if busca:
-        # Filtra ignorando maiúsculas/minúsculas
-        mask = df['nome'].str.contains(busca, case=False, na=False) | df['sku'].str.contains(busca, case=False, na=False)
-        df_filtrado = df[mask]
-    else:
-        df_filtrado = df
+        mask_texto = df_filtrado['nome'].str.contains(busca, case=False, na=False) | df_filtrado['sku'].str.contains(busca, case=False, na=False)
+        df_filtrado = df_filtrado[mask_texto]
+        
+    if filtro_fornecedor:
+        df_filtrado = df_filtrado[df_filtrado['fornecedor'].isin(filtro_fornecedor)]
 
-    # --- LÓGICA DE AGRUPAMENTO ---
-    # Pegamos a lista única de SKUs presentes no filtro (mantendo a ordem cronológica do DF original)
+    # --- RESULTADO ---
     skus_unicos = df_filtrado['sku'].unique()
-
-    st.markdown(f"**Encontrados:** {len(skus_unicos)} produtos distintos nas compras filtradas.")
+    st.caption(f"Mostrando {len(skus_unicos)} produtos de {len(df_filtrado)} registros encontrados.")
     st.divider()
 
-    # Para cada SKU único, cria um bloco visual
     for sku in skus_unicos:
-        # Pega todo o histórico desse SKU
         historico_produto = df_filtrado[df_filtrado['sku'] == sku]
-        
-        # A primeira linha é a mais recente (pois o SQL já ordenou DESC)
         ultima_compra = historico_produto.iloc[0]
         
         nome_prod = ultima_compra['nome']
         data_recente = pd.to_datetime(ultima_compra['data_compra']).strftime('%d/%m/%Y')
         preco_recente = ultima_compra['preco_final']
+        fornecedor_top = ultima_compra['fornecedor']
         
-        # Título do Dropdown (Resumo)
-        label_expander = f"📦 {sku} | {nome_prod} — Última: R$ {preco_recente:,.2f} em {data_recente}"
+        # Título do Dropdown
+        label_expander = f"📦 {sku} | {nome_prod} — R$ {preco_recente:,.2f} ({data_recente})"
         
         with st.expander(label_expander):
-            # --- DETALHES DA ÚLTIMA COMPRA (DESTAQUE) ---
-            st.markdown("#### 🔖 Detalhes da Compra Mais Recente")
+            st.markdown("#### 🔖 Compra Mais Recente")
             
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Preço Compra (NF)", f"R$ {ultima_compra['preco_partida']:,.2f}")
-            c2.metric("Custo Final", f"R$ {ultima_compra['preco_final']:,.2f}", help="Custo com impostos recuperáveis descontados")
-            c3.metric("Impostos %", f"IPI: {ultima_compra['ipi_percent']}% | ICMS: {ultima_compra['icms_percent']}%")
-            c4.metric("Nota Fiscal", f"{ultima_compra['nro_nf']}")
+            c1.markdown(f"<div class='label-info'>Fornecedor</div><div class='value-info'>{fornecedor_top}</div>", unsafe_allow_html=True)
+            c2.markdown(f"<div class='label-info'>Preço NF</div><div class='value-info'>R$ {ultima_compra['preco_partida']:,.2f}</div>", unsafe_allow_html=True)
+            c3.markdown(f"<div class='label-info'>Custo Final</div><div class='value-info'>R$ {ultima_compra['preco_final']:,.2f}</div>", unsafe_allow_html=True)
+            c4.markdown(f"<div class='label-info'>NF</div><div class='value-info'>{ultima_compra['nro_nf']}</div>", unsafe_allow_html=True)
 
-            # --- TABELA COM AS 5 ÚLTIMAS COMPRAS ---
-            st.markdown("#### ⏳ Histórico Recente (Últimas 5 Entradas)")
+            st.write("")
+            st.markdown("#### ⏳ Histórico Recente")
             
-            # Pega as 5 primeiras linhas e seleciona colunas úteis
             top_5 = historico_produto.head(5).copy()
-            
-            # Renomeia para ficar bonito na tabela
             cols_show = {
                 'data_compra': 'Data',
+                'fornecedor': 'Fornecedor',
                 'nro_nf': 'Nota Fiscal',
                 'quantidade': 'Qtd',
                 'preco_partida': 'Valor NF (Un)',
-                'ipi_percent': 'IPI %',
-                'icms_percent': 'ICMS %',
                 'preco_final': 'Custo Real (Un)'
             }
             
-            # Formata datas
             top_5['data_compra'] = pd.to_datetime(top_5['data_compra']).dt.strftime('%d/%m/%Y')
             
-            # Exibe tabela estilizada
             st.dataframe(
                 top_5[cols_show.keys()].rename(columns=cols_show).style.format({
                     'Valor NF (Un)': 'R$ {:,.2f}',
-                    'Custo Real (Un)': 'R$ {:,.2f}',
-                    'IPI %': '{:.1f}%',
-                    'ICMS %': '{:.1f}%'
+                    'Custo Real (Un)': 'R$ {:,.2f}'
                 }),
                 use_container_width=True,
                 hide_index=True
             )
-            
 else:
-    st.info("Nenhum histórico de compras encontrado no banco de dados.")
+    st.info("Nenhum histórico encontrado.")
