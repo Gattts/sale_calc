@@ -1,99 +1,125 @@
 import streamlit as st
 import pandas as pd
-import os
+from sqlalchemy import create_engine, text
 
-st.set_page_config(page_title="Produtos", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Catálogo de Produtos", page_icon="📦", layout="wide")
 
-# --- Função de Carregamento ---
+# ==============================================================================
+# 1. CONEXÃO COM O BANCO AWS
+# ==============================================================================
+DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
+DB_USER = "admin"
+DB_PASS = "Sigmacomjp25"
+DB_NAME = "marketmanager"
+
+@st.cache_resource
+def get_engine():
+    return create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
+
 def carregar_produtos():
-    # Caminho absoluto para garantir que ache o arquivo na raiz
-    raiz = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    caminho_csv = os.path.join(raiz, 'produtos.csv')
-    
-    if not os.path.exists(caminho_csv):
-        st.error("Arquivo produtos.csv não encontrado!")
+    """Busca todos os produtos ativos no banco"""
+    query = """
+        SELECT id, sku, nome, quantidade, preco_partida, preco_final, nro_nf, data_compra, criado_em
+        FROM produtos 
+        ORDER BY data_compra DESC, id DESC
+    """
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            return pd.read_sql(text(query), conn)
+    except Exception as e:
+        st.error(f"Erro ao carregar banco: {e}")
         return pd.DataFrame()
-    
-    # Lê o CSV
-    df = pd.read_csv(caminho_csv)
-    # Garante que a data é data mesmo (para ordenar)
-    df['data_compra'] = pd.to_datetime(df['data_compra'])
-    return df
 
-st.title("📦 Catálogo de Produtos e Histórico")
-st.markdown("Visualize o preço atual e expanda para ver as últimas 5 compras.")
+def excluir_produto(id_produto):
+    """Remove um produto pelo ID"""
+    query = "DELETE FROM produtos WHERE id = :id"
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text(query), {"id": id_produto})
+            conn.commit()
+            return True
+    except Exception as e:
+        st.error(f"Erro ao excluir: {e}")
+        return False
+
+# ==============================================================================
+# 2. INTERFACE
+# ==============================================================================
+st.title("📦 Catálogo de Produtos (Nuvem)")
+
+# Botão de refresh manual
+if st.button("🔄 Atualizar Lista"):
+    st.cache_data.clear()
+    st.rerun()
 
 df = carregar_produtos()
 
 if not df.empty:
-    # --- FILTRO DE BUSCA ---
-    busca = st.text_input("🔍 Buscar por Nome ou SKU", placeholder="Digite para filtrar...")
+    # --- MÉTRICAS ---
+    c1, c2, c3 = st.columns(3)
+    qtd_total = df['quantidade'].sum()
+    investimento = (df['quantidade'] * df['preco_partida']).sum()
+    valor_venda_est = (df['quantidade'] * df['preco_final']).sum() # Estimativa baseada no custo final (mínimo)
+
+    c1.metric("Itens em Estoque", qtd_total)
+    c2.metric("Custo de Estoque", f"R$ {investimento:,.2f}")
+    c3.metric("Valor Base (Min)", f"R$ {valor_venda_est:,.2f}", help="Baseado no Custo Final calculado")
     
-    if busca:
-        df = df[df['nome'].str.contains(busca, case=False) | df['sku'].str.contains(busca, case=False)]
-
-    # --- LÓGICA DE AGRUPAMENTO ---
-    # Pegamos a lista de SKUs únicos para montar as "linhas"
-    skus_unicos = df['sku'].unique()
-
-    # Cabeçalho da "Tabela" visual
-    cols = st.columns([1.5, 3, 1.5, 1.5, 1.5, 1.5, 1])
-    cols[0].markdown("**SKU**")
-    cols[1].markdown("**Produto**")
-    cols[2].markdown("**R$ Partida**")
-    cols[3].markdown("**Última NF**")
-    cols[4].markdown("**Data**")
-    cols[5].markdown("**R$ Final**")
-    cols[6].markdown("**Qtd**")
     st.divider()
 
-    # Loop para criar as linhas expansíveis
-    for sku in skus_unicos:
-        # Filtra todas as compras desse produto e ordena pela data (mais nova primeiro)
-        historico = df[df['sku'] == sku].sort_values(by='data_compra', ascending=False)
-        
-        # Pega a compra mais recente (Topo da lista)
-        atual = historico.iloc[0]
+    # --- FILTROS ---
+    col_search, col_del = st.columns([3, 1])
+    
+    with col_search:
+        busca = st.text_input("🔍 Buscar por Nome ou SKU", placeholder="Ex: Monitor Dell...")
+    
+    # Filtra o DataFrame
+    if busca:
+        mask = df['nome'].str.contains(busca, case=False, na=False) | df['sku'].str.contains(busca, case=False, na=False)
+        df_show = df[mask]
+    else:
+        df_show = df
 
-        # Formata os valores para exibição no título
-        texto_partida = f"R$ {atual['preco_partida']:,.2f}"
-        texto_final = f"R$ {atual['preco_final']:,.2f}"
-        data_formatada = atual['data_compra'].strftime('%d/%m/%Y')
+    # --- TABELA ---
+    st.subheader(f"Listagem ({len(df_show)} produtos)")
+    
+    # Renomear colunas para ficar bonito
+    df_display = df_show[['id', 'sku', 'nome', 'nro_nf', 'quantidade', 'preco_partida', 'preco_final', 'data_compra']].copy()
+    df_display.columns = ['ID', 'SKU', 'Produto', 'NF', 'Qtd', 'Preço Compra', 'Custo Final', 'Data']
+    
+    # Formatação visual
+    st.dataframe(
+        df_display.style.format({
+            "Preço Compra": "R$ {:,.2f}",
+            "Custo Final": "R$ {:,.2f}",
+            "Data": "{:%d/%m/%Y}"
+        }),
+        use_container_width=True,
+        hide_index=True,
+        height=500
+    )
 
-        # --- O TRUQUE VISUAL ---
-        # Usamos o Expander como se fosse uma linha da tabela
-        # O label do expander resume as informações principais
-        label_expander = f"{atual['sku']}  |  {atual['nome']}  (Última: {data_formatada})"
-        
-        with st.expander(label_expander):
-            # Parte de cima: Detalhes da última compra em destaque
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Preço Partida", texto_partida)
-            c2.metric("IPI", f"{atual['ipi_percent']}%")
-            c3.metric("ICMS", f"{atual['icms_percent']}%")
-            c4.metric("Preço Final Calculado", texto_final)
-
-            st.markdown("#### 🕒 Histórico das últimas 5 compras")
+    # --- ÁREA DE EXCLUSÃO ---
+    with col_del:
+        with st.container(border=True):
+            st.write("🗑️ **Excluir Item**")
+            id_para_excluir = st.number_input("ID do Produto", min_value=0, value=0, help="Veja o ID na tabela ao lado")
             
-            # Mostra apenas as 5 primeiras do histórico (Paginação simplificada)
-            top_5 = historico.head(5).copy()
-            
-            # Formatação visual da tabelinha interna
-            st.dataframe(
-                top_5,
-                column_config={
-                    "data_compra": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                    "preco_partida": st.column_config.NumberColumn("Partida", format="R$ %.2f"),
-                    "preco_final": st.column_config.NumberColumn("Final", format="R$ %.2f"),
-                    "ipi_percent": st.column_config.NumberColumn("IPI %", format="%.1f%%"),
-                    "icms_percent": st.column_config.NumberColumn("ICMS %", format="%.1f%%"),
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-            
-            if len(historico) > 5:
-                st.info(f"Existem mais {len(historico) - 5} registros antigos não exibidos.")
+            if st.button("Excluir", type="primary"):
+                if id_para_excluir > 0:
+                    # Verifica se existe antes de tentar apagar (opcional, mas bom pra UX)
+                    if id_para_excluir in df['id'].values:
+                        if excluir_produto(id_para_excluir):
+                            st.toast(f"Produto ID {id_para_excluir} removido!", icon="🗑️")
+                            import time
+                            time.sleep(1) # Espera um pouquinho pro toast aparecer
+                            st.rerun()
+                    else:
+                        st.error("ID não encontrado.")
+                else:
+                    st.warning("Informe um ID válido.")
 
 else:
-    st.warning("Nenhum produto cadastrado no CSV.")
+    st.info("O catálogo está vazio. Cadastre produtos na página inicial.")
