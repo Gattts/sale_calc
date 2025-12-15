@@ -239,9 +239,10 @@ with tab1:
 with tab2:
     st.markdown("### ☁️ Gestão de Custos")
     
-    # Busca com campo 'fornecedor'
-    query_load = "SELECT id, sku, nome, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, fornecedor FROM produtos ORDER BY nome ASC"
+    # Busca agora INCLUI A COLUNA FORNECEDOR
+    query_load = "SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf FROM produtos ORDER BY nome ASC"
     df_prods = run_query(query_load)
+    
     opcoes_busca = ["✨ Novo Produto"]
     mapa_dados = {}
     
@@ -260,11 +261,13 @@ with tab2:
             st.session_state.prod_id_selecionado = d['id']
             st.session_state['in_sku'] = str(d['sku'])
             st.session_state['in_nome'] = str(d['nome'])
+            
+            # 🔴 PREENCHIMENTO AUTOMÁTICO DO FORNECEDOR
+            forn_raw = d.get('fornecedor')
+            st.session_state['in_forn'] = str(forn_raw) if forn_raw and str(forn_raw) != 'None' else ""
+
             st.session_state['in_nf'] = str(d['nro_nf']) if d['nro_nf'] else ""
             st.session_state['in_qtd'] = int(d['quantidade'])
-            # NOVO: Carrega Fornecedor
-            st.session_state['in_forn'] = str(d['fornecedor']) if d['fornecedor'] else ""
-            
             st.session_state['pc_cad'] = str(d['preco_partida'])
             st.session_state['ipi_cad'] = str(d['ipi_percent'])
             st.session_state['icmsp_cad'] = str(d['icms_percent'])
@@ -285,7 +288,7 @@ with tab2:
             nome_val = c2.text_input("Nome", key="in_nome")
             
             c3, c4 = st.columns(2)
-            # NOVO: Campo Fornecedor
+            # O Campo Fornecedor agora usa a key 'in_forn' populada acima
             forn_val = c3.text_input("Fornecedor", key="in_forn")
             qtd_val = c4.number_input("Qtd", min_value=1, key="in_qtd")
 
@@ -315,7 +318,7 @@ with tab2:
             if b2.button("💾 Salvar Novo", type="primary", use_container_width=True):
                 if sku_val and nome_val:
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    # INSERT COM FORNECEDOR
+                    # INSERT com Fornecedor
                     sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, data_compra) 
                              VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :dt)"""
                     params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "dt": date.today()}
@@ -327,7 +330,7 @@ with tab2:
             if st.session_state.prod_id_selecionado:
                 if b3.button("✏️ Atualizar", use_container_width=True):
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    # UPDATE COM FORNECEDOR
+                    # UPDATE com Fornecedor
                     sql = """UPDATE produtos SET sku=:sku, nome=:nome, fornecedor=:forn, nro_nf=:nf, quantidade=:qtd, 
                              preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf WHERE id=:id"""
                     params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "id": st.session_state.prod_id_selecionado}
