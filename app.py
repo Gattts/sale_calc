@@ -24,6 +24,7 @@ TABELA_FRETE_ML = {
 
 def input_float(label, value, key, step=None):
     """Componente flexível: Aceita texto para permitir vírgula ou ponto."""
+    # Garante que o valor inicial seja string para não quebrar o text_input
     val_str = st.text_input(label, value=str(value), key=key)
     try:
         return float(val_str.replace(',', '.'))
@@ -57,12 +58,9 @@ def calcular_custo_aquisicao(preco_compra, frete, ipi_pct, outros, st_val, icms_
         c_icms_prod = preco_compra * (icms_prod / 100)
         credito_icms = c_icms_frete + c_icms_prod
         
-        # 2. PIS/COFINS (Base Reduzida: Exclui ICMS da base conforme Lei 14.754)
-        # Base Produto = Valor Produto - ICMS Produto
+        # 2. PIS/COFINS (Base Reduzida: Exclui ICMS da base)
         base_pis_cofins_prod = preco_compra - c_icms_prod
-        # Base Frete = Valor Frete - ICMS Frete
         base_pis_cofins_frete = frete - c_icms_frete
-        
         base_total = base_pis_cofins_prod + base_pis_cofins_frete
         
         credito_pis = base_total * (pis_pct / 100)
@@ -248,9 +246,13 @@ with st.sidebar:
                     item_data['data_compra'] = pd.to_datetime(item_data['data_compra'])
                     item_data = item_data.sort_values(by='data_compra', ascending=False)
                 ultimo_registro = item_data.iloc[0]
-                st.session_state['pc_cad'] = float(ultimo_registro.get('preco_partida', 0.0))
-                st.session_state['ipi_cad'] = float(ultimo_registro.get('ipi_percent', 0.0))
-                st.session_state['icmsp_cad'] = float(ultimo_registro.get('icms_percent', 0.0))
+                
+                # --- CORREÇÃO AQUI ---
+                # Converter para string antes de jogar no session_state, pois o input_float (text_input) espera string
+                st.session_state['pc_cad'] = str(float(ultimo_registro.get('preco_partida', 0.0)))
+                st.session_state['ipi_cad'] = str(float(ultimo_registro.get('ipi_percent', 0.0)))
+                st.session_state['icmsp_cad'] = str(float(ultimo_registro.get('icms_percent', 0.0)))
+                
                 st.success("Valores carregados!")
     
     custo_display = st.session_state.get('custo_produto_final', 0.0)
