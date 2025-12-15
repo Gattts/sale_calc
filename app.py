@@ -9,7 +9,7 @@ from datetime import date, datetime
 # ==============================================================================
 st.set_page_config(page_title="Calculadora Market", layout="wide", page_icon="🧮")
 
-# Tabela de Fretes Mercado Livre (Mantida)
+# Tabela de Fretes Mercado Livre
 TABELA_FRETE_ML = {
     "79-99": [(0.3, 11.97), (0.5, 12.87), (1.0, 13.47), (2.0, 14.07), (3.0, 14.97), (4.0, 16.17), (5.0, 17.07), (9.0, 26.67), (13.0, 39.57), (17.0, 44.07), (23.0, 51.57), (30.0, 59.37), (40.0, 61.17), (50.0, 63.27), (60.0, 67.47), (70.0, 72.27), (80.0, 75.57), (90.0, 83.97), (100.0, 95.97), (125.0, 107.37), (150.0, 113.97)],
     "100-119": [(0.3, 13.97), (0.5, 15.02), (1.0, 15.72), (2.0, 16.42), (3.0, 17.47), (4.0, 18.87), (5.0, 19.92), (9.0, 31.12), (13.0, 46.17), (17.0, 51.42), (23.0, 60.17), (30.0, 69.27), (40.0, 71.37), (50.0, 73.82), (60.0, 78.72), (70.0, 84.32), (80.0, 88.17), (90.0, 97.97), (100.0, 111.97), (125.0, 125.27)],
@@ -21,6 +21,14 @@ TABELA_FRETE_ML = {
 # ==============================================================================
 # 2. FUNÇÕES DE SUPORTE
 # ==============================================================================
+
+def input_float(label, value, key, step=None):
+    """Componente flexível: Aceita texto para permitir vírgula ou ponto."""
+    val_str = st.text_input(label, value=str(value), key=key)
+    try:
+        return float(val_str.replace(',', '.'))
+    except ValueError:
+        return 0.0
 
 def ler_catalogo():
     if os.path.exists('produtos.csv'):
@@ -44,11 +52,21 @@ def calcular_custo_aquisicao(preco_compra, frete, ipi_pct, outros, st_val, icms_
     credito_cofins = 0.0
     
     if is_lucro_real:
+        # 1. ICMS (Base Cheia)
         c_icms_frete = frete * (icms_frete / 100)
         c_icms_prod = preco_compra * (icms_prod / 100)
         credito_icms = c_icms_frete + c_icms_prod
-        credito_pis = preco_compra * (pis_pct / 100)
-        credito_cofins = preco_compra * (cofins_pct / 100)
+        
+        # 2. PIS/COFINS (Base Reduzida: Exclui ICMS da base conforme Lei 14.754)
+        # Base Produto = Valor Produto - ICMS Produto
+        base_pis_cofins_prod = preco_compra - c_icms_prod
+        # Base Frete = Valor Frete - ICMS Frete
+        base_pis_cofins_frete = frete - c_icms_frete
+        
+        base_total = base_pis_cofins_prod + base_pis_cofins_frete
+        
+        credito_pis = base_total * (pis_pct / 100)
+        credito_cofins = base_total * (cofins_pct / 100)
     
     total_creditos = credito_icms + credito_pis + credito_cofins
     custo_final = preco_medio - total_creditos
@@ -113,7 +131,7 @@ def calcular_cenario(margem_alvo, preco_venda_manual, comissao_pct, modo_calculo
     val_marketplace_total = (preco_final * (comissao_pct/100)) + frete_aplicado + taxa_fixa_extra + (custo_armaz_fixo if is_fulfillment else (preco_final*(taxa_armaz_variavel/100)))
     val_impostos_total = val_icms + (preco_final*difal_rate) + ((preco_final-val_icms)*pis_rate) + ((preco_final-val_icms)*cofins_rate)
     val_lucro = preco_final - val_impostos_total - val_marketplace_total - custo_final_produto
-    val_repasse = preco_final - val_marketplace_total # Repasse = Venda - Taxas Mkt
+    val_repasse = preco_final - val_marketplace_total
 
     return {
         "preco": preco_final, "lucro": val_lucro, "margem": margem_real, "repasse": val_repasse,
@@ -133,7 +151,6 @@ def render_result_box(repasse, lucro, margem):
     return f"""<div class="result-box"><div style="border-right: 1px solid var(--border-color); padding-right: 10px;"><div class="lucro-label">Repasse Mkt</div><div class="lucro-valor" style="color: var(--secondary-color);">R$ {repasse:.2f}</div></div><div style="padding-left: 10px;"><div class="lucro-label">Lucro ({margem:.1f}%)</div><div class="lucro-valor" style="color: {cor};">{seta} R$ {lucro:.2f}</div></div></div>"""
 
 def render_card_html(d, comissao, nome_icms, icms_venda_pct, difal_pct, is_fulfillment):
-    # (HTML minimizado para economizar espaço visual, lógica mantida)
     base_calc = "Custo" if is_fulfillment else "Venda"
     armaz_html = f'<div class="sub-row"><span>Armaz. (% s/ {base_calc})</span> <span>R$ {d["mkt_armazenagem"]:.2f}</span></div>' if d.get('mkt_armazenagem', 0) > 0 else ""
     return f"""<div class="custom-accordion"><details><summary><span>(-) Impostos Venda</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['impostos_venda_total']:.2f}</span></summary><div class="details-content"><div class="sub-row"><span>{nome_icms} ({icms_venda_pct}%)</span> <span>R$ {d['val_icms']:.2f}</span></div><div class="sub-row"><span>DIFAL ({difal_pct}%)</span> <span>R$ {d['val_difal']:.2f}</span></div><div class="sub-row"><span>PIS ({d['pis_rate_used']:.2f}%)</span> <span>R$ {d['val_pis']:.2f}</span></div><div class="sub-row"><span>COFINS ({d['cofins_rate_used']:.2f}%)</span> <span>R$ {d['val_cofins']:.2f}</span></div></div></details><details><summary><span>(-) Custos Marketplace</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['mkt_total']:.2f}</span></summary><div class="details-content"><div class="sub-row"><span>Comissão ({comissao}%)</span> <span>R$ {d['mkt_comissao']:.2f}</span></div><div class="sub-row"><span>Frete</span> <span>R$ {d['mkt_frete']:.2f}</span></div>{armaz_html}</div></details><details><summary><span>(-) Custo Produto Final</span><span class="dotted-fill"></span><span class="summary-value">R$ {d['custo_prod_total']:.2f}</span></summary><div class="details-content"><div class="sub-row"><span>Preço Compra Médio</span> <span>R$ {d['preco_medio']:.2f}</span></div><div style="margin-top:5px;border-top:1px dashed var(--border-color);padding-top:4px;"><span style="font-size:0.9em;color:var(--text-muted);">Abatimentos:</span><div class="credit-row"><span>• ICMS</span> <span>- R$ {d['credito_icms']:.2f}</span></div><div class="credit-row"><span>• PIS</span> <span>- R$ {d['credito_pis']:.2f}</span></div><div class="credit-row"><span>• COFINS</span> <span>- R$ {d['credito_cofins']:.2f}</span></div></div></div></details></div>"""
@@ -145,13 +162,11 @@ def render_card_html(d, comissao, nome_icms, icms_venda_pct, difal_pct, is_fulfi
 def dialog_registrar_compra(dados_calculados, inputs_originais):
     st.caption("Preencha os detalhes para salvar no histórico de produtos.")
     
-    # Se o nome veio do selectbox, tentamos usar
     nome_sugerido = ""
     sku_sugerido = ""
     
     if st.session_state.get('last_selected_product') and st.session_state.get('last_selected_product') != "Teste (Novo Produto)":
         full_text = st.session_state['last_selected_product']
-        # Tenta separar Nome de SKU "Produto X (SKU123)"
         try:
             nome_sugerido = full_text.split(" (")[0]
             sku_sugerido = full_text.split(" (")[-1].replace(")", "")
@@ -173,7 +188,6 @@ def dialog_registrar_compra(dados_calculados, inputs_originais):
         if not sku or not nome or not nf:
             st.error("Preencha SKU, Nome e Nota Fiscal.")
         else:
-            # Prepara o Dicionário para salvar
             novo_registro = {
                 'sku': sku,
                 'nome': nome,
@@ -186,7 +200,6 @@ def dialog_registrar_compra(dados_calculados, inputs_originais):
                 'quantidade': qtd
             }
             
-            # Salva no CSV
             arquivo = 'produtos.csv'
             df_novo = pd.DataFrame([novo_registro])
             
@@ -245,14 +258,14 @@ with st.sidebar:
 
     st.subheader("💸 Tributos Venda")
     col_t1, col_t2 = st.columns(2)
-    icms_venda_pct = col_t1.number_input("ICMS (%)", 18.0, step=0.5, format="%.2f")
-    difal_pct = col_t2.number_input("DIFAL (%)", 0.0, step=0.5, format="%.2f")
+    icms_venda_pct = input_float("ICMS (%)", 18.0, key="icms_venda_pct")
+    difal_pct = input_float("DIFAL (%)", 0.0, key="difal_pct")
     
     st.subheader("🚚 Logística")
     is_fulfillment = st.toggle("⚡ Envio Full?", value=False)
     col_l1, col_l2 = st.columns(2)
-    peso_input = col_l1.number_input("Peso (Kg)", 0.3, step=0.1, format="%.2f")
-    armazenagem_pct = col_l2.number_input("Armaz. (%)", 0.0, step=0.1, format="%.2f", help="Sobre Custo (Full) ou Venda (Flex)")
+    peso_input = input_float("Peso (Kg)", 0.3, key="peso_input")
+    armazenagem_pct = input_float("Armaz. (%)", 0.0, key="armazenagem_pct")
 
 # CSS
 css_variables = "--primary-color: #1e3a8a; --secondary-color: #2c3e50; --card-bg: #ffffff; --text-color: #333; --text-muted: #666; --border-color: #e0e0e0; --success-color: #27ae60; --danger-color: #ef4444; --hover-bg: #f8f9fa; --dotted-color: #ccc;"
@@ -283,11 +296,11 @@ with tab_calc:
                     h1.markdown(f'<div class="card-title">{tipo_anuncio}</div>', unsafe_allow_html=True)
                     with h2:
                         cc1, cc2 = st.columns(2)
-                        com = cc1.number_input("🏷️ Comis.", value=com_padrao, step=0.5, format="%.1f", key=f"c_{tipo_anuncio}")
-                        margem_in = cc2.number_input("📈 Margem", value=15.0, step=0.5, format="%.1f", key=f"m_{tipo_anuncio}", disabled=(modo=="preco"))
+                        com = input_float("🏷️ Comis.", com_padrao, key=f"c_{tipo_anuncio}")
+                        margem_in = input_float("📈 Margem", 15.0, key=f"m_{tipo_anuncio}")
                     st.markdown('<p class="price-label">Preço Calculado</p>', unsafe_allow_html=True)
                     if modo == "preco":
-                        price_man = st.number_input("", value=price_padrao, step=0.5, format="%.2f", key=f"p_{tipo_anuncio}", label_visibility="collapsed")
+                        price_man = input_float("", price_padrao, key=f"p_{tipo_anuncio}")
                         res = calcular_cenario(0, price_man, com, "preco", canal, st.session_state['custo_produto_final'], st.session_state['detalhes_custo'], icms_venda_pct, difal_pct, peso_input, is_fulfillment, armazenagem_pct)
                     else:
                         res = calcular_cenario(margem_in, 0, com, "margem", canal, st.session_state['custo_produto_final'], st.session_state['detalhes_custo'], icms_venda_pct, difal_pct, peso_input, is_fulfillment, armazenagem_pct)
@@ -302,11 +315,11 @@ with tab_calc:
                 h1u.markdown(f'<div class="card-title">{nome_canal_titulo}</div>', unsafe_allow_html=True)
                 with h2u:
                     cu1, cu2 = st.columns(2)
-                    com = cu1.number_input("🏷️ Comis.", value=18.0, step=0.5, format="%.1f", key="c_u")
-                    margem_in = cu2.number_input("📈 Margem", value=15.0, step=0.5, format="%.1f", key="m_u", disabled=(modo=="preco"))
+                    com = input_float("🏷️ Comis.", 18.0, key="c_u")
+                    margem_in = input_float("📈 Margem", 15.0, key="m_u")
                 st.markdown('<p class="price-label">Preço Calculado</p>', unsafe_allow_html=True)
                 if modo == "preco":
-                    price_man = st.number_input("", value=100.00, step=0.5, format="%.2f", key="p_u", label_visibility="collapsed")
+                    price_man = input_float("", 100.00, key="p_u")
                     res = calcular_cenario(0, price_man, com, "preco", canal, st.session_state['custo_produto_final'], st.session_state['detalhes_custo'], icms_venda_pct, difal_pct, peso_input, is_fulfillment, armazenagem_pct)
                 else:
                     res = calcular_cenario(margem_in, 0, com, "margem", canal, st.session_state['custo_produto_final'], st.session_state['detalhes_custo'], icms_venda_pct, difal_pct, peso_input, is_fulfillment, armazenagem_pct)
@@ -327,19 +340,23 @@ with tab_cadastro:
             l_real = st.toggle("Lucro Real?", value=True, key="regime_cad")
             
             c1, c2, c3 = st.columns(3)
-            p_compra = c1.number_input("Preço Compra ($)", 0.0, step=1.0, key="pc_cad")
-            p_frete = c2.number_input("Frete Entrada ($)", 0.0, step=0.5, key="fr_cad")
-            p_ipi = c3.number_input("IPI (%)", 0.0, step=0.5, key="ipi_cad")
+            p_compra = input_float("Preço Compra ($)", 0.0, key="pc_cad")
+            p_frete = input_float("Frete Entrada ($)", 0.0, key="fr_cad")
+            p_ipi = input_float("IPI (%)", 0.0, key="ipi_cad")
             
             c4, c5 = st.columns(2)
-            p_outros = c4.number_input("Outros Custos ($)", 0.0, step=1.0, key="out_cad")
-            p_st = c5.number_input("ICMS ST ($)", 0.0, step=1.0, key="st_cad")
+            p_outros = input_float("Outros Custos ($)", 0.0, key="out_cad")
+            p_st = input_float("ICMS ST ($)", 0.0, key="st_cad")
             
             st.markdown("#### Créditos")
             cc1, cc2 = st.columns(2)
-            icms_fr_pct = cc1.number_input("ICMS Frete (%)", 12.0, step=0.5, key="icmsf_cad")
+            icms_fr_pct = input_float("ICMS Frete (%)", 0.0, key="icmsf_cad")
             travado = (p_st > 0)
-            icms_pr_pct = cc2.number_input("ICMS Produto (%)", 0.0 if travado else 12.0, step=0.5, disabled=travado, key="icmsp_cad")
+            if travado:
+                st.caption("ICMS Prod. bloqueado (ST > 0)")
+                icms_pr_pct = 0.0
+            else:
+                icms_pr_pct = input_float("ICMS Produto (%)", 12.0, key="icmsp_cad")
             
             is_imp = st.toggle("Importação?", False, key="imp_cad")
             pis_c, cofins_c = (2.10, 9.65) if is_imp else (1.65, 7.60)
@@ -348,7 +365,6 @@ with tab_cadastro:
             st.write("")
             col_b1, col_b2 = st.columns(2)
             
-            # --- BOTÃO 1: SIMULAR ---
             if col_b1.button("🔄 SIMULAR CUSTO (CACHE)", use_container_width=True):
                 res = calcular_custo_aquisicao(p_compra, p_frete, p_ipi, p_outros, p_st, icms_fr_pct, icms_pr_pct, pis_c, cofins_c, l_real)
                 st.session_state['custo_produto_final'] = res['custo_final']
@@ -356,14 +372,9 @@ with tab_cadastro:
                 st.session_state['preview_cadastro'] = res
                 st.toast("Custo simulado! Veja na aba Calculadora.", icon="🟦")
 
-            # --- BOTÃO 2: REGISTRAR (POP-UP) ---
             if col_b2.button("💾 REGISTRAR COMPRA (CSV)", type="primary", use_container_width=True):
-                # Primeiro calculamos para garantir que temos os dados
                 res = calcular_custo_aquisicao(p_compra, p_frete, p_ipi, p_outros, p_st, icms_fr_pct, icms_pr_pct, pis_c, cofins_c, l_real)
-                # Dados brutos dos inputs para salvar no CSV
                 inputs_raw = {'p_compra': p_compra, 'ipi': p_ipi, 'icms_prod': icms_pr_pct}
-                
-                # Abre o DIALOG
                 dialog_registrar_compra(res, inputs_raw)
             
     with col_resumo:
