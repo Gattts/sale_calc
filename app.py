@@ -5,22 +5,20 @@ from datetime import date
 import time
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILO (CSS AJUSTADO)
+# 1. CONFIGURAÇÃO E ESTILO
 # ==============================================================================
 st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="🚀")
 
 st.markdown("""
 <style>
-    /* 1. Ajuste do Topo */
+    /* Topo Ajustado */
     .block-container {
         padding-top: 3rem !important;
         padding-bottom: 1rem !important;
     }
-    
-    /* 2. Botões */
     .stButton>button { border-radius: 8px; font-weight: bold; }
     
-    /* 3. Cards de Resultado */
+    /* Cards de Resultado */
     .result-card {
         background-color: #f8f9fa;
         border: 1px solid #e0e0e0;
@@ -30,42 +28,19 @@ st.markdown("""
         margin-bottom: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .card-title { 
-        font-size: 14px; 
-        color: #666; 
-        text-transform: uppercase; 
-        letter-spacing: 1px; 
-        margin-bottom: 5px; 
-    }
-    .card-price { 
-        font-size: 26px; 
-        font-weight: 800; 
-        color: #1E88E5; 
-        margin: 0; 
-        line-height: 1.2; 
-    }
-    .card-profit { 
-        font-size: 20px; 
-        font-weight: bold; 
-        color: #2E7D32; 
-        margin-top: 5px; 
-    }
-    /* 4. Rodapé do Card (Frete e Repasse - AUMENTADO) */
+    .card-title { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+    .card-price { font-size: 26px; font-weight: 800; color: #1E88E5; margin: 0; line-height: 1.2; }
+    .card-profit { font-size: 20px; font-weight: bold; color: #2E7D32; margin-top: 5px; }
     .card-footer { 
-        margin-top: 12px; 
-        padding-top: 12px; 
-        border-top: 1px solid #ddd; 
-        font-size: 16px; /* Aumentado de 13px para 16px */
-        font-weight: 600; /* Mais destaque */
-        color: #333; 
-        display: flex; 
-        justify-content: space-between;
+        margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd; 
+        font-size: 16px; font-weight: 600; color: #333; 
+        display: flex; justify-content: space-between;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CONEXÃO COM BANCO (AWS)
+# 2. CONEXÃO AWS
 # ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
@@ -97,7 +72,7 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. LÓGICA DE NEGÓCIO
+# 3. CÁLCULOS
 # ==============================================================================
 TABELA_FRETE_ML = {
     "79-99": [(0.3, 11.97), (0.5, 12.87), (1.0, 13.47), (2.0, 14.07), (3.0, 14.97), (4.0, 16.17), (5.0, 17.07), (9.0, 26.67), (13.0, 39.57), (17.0, 44.07), (23.0, 51.57), (30.0, 59.37), (40.0, 61.17), (50.0, 63.27), (60.0, 67.47), (70.0, 72.27), (80.0, 75.57), (90.0, 83.97), (100.0, 95.97), (125.0, 107.37), (150.0, 113.97)],
@@ -145,15 +120,12 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     pis, cofins = 0.0165, 0.0760
     taxa_imposto_total = icms + difal + ((1-icms) * (pis + cofins))
     frete, taxa_extra, custo_fixo_extra, taxa_var_extra = 0.0, 0.0, 0.0, 0.0
-    
     if is_full: custo_fixo_extra += custo_final * (armaz/100)
     else: taxa_var_extra += armaz
-
     if "Shopee" in canal: taxa_extra += 4.00
     elif "Mercado Livre" in canal:
         if modo == "preco": frete = obter_frete_ml(preco_manual, peso)
         else: frete = obter_frete_ml(custo_final * 1.5, peso)
-
     if modo == "margem":
         divisor = 1 - (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100) + (margem_alvo/100))
         numerador = custo_final + frete + taxa_extra + custo_fixo_extra
@@ -168,14 +140,12 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
         preco = preco_manual
         custos = (preco * (taxa_imposto_total + comissao/100 + taxa_var_extra/100)) + frete + taxa_extra + custo_final + custo_fixo_extra
         margem_real = ((preco - custos) / preco * 100) if preco > 0 else 0
-
     val_mkt = (preco * comissao/100) + frete + taxa_extra
     lucro = preco * (1 - taxa_imposto_total) - val_mkt - custo_final - custo_fixo_extra
     return {"preco": preco, "lucro": lucro, "margem": margem_real, "repasse": preco - val_mkt, "frete": frete}
 
 def exibir_card_compacto(titulo, dados):
-    """Renderiza o card HTML compacto com fontes ajustadas"""
-    html = f"""
+    st.markdown(f"""
     <div class="result-card">
         <div class="card-title">{titulo}</div>
         <div class="card-price">R$ {dados['preco']:.2f}</div>
@@ -185,8 +155,7 @@ def exibir_card_compacto(titulo, dados):
             <span>🤝 Repasse: R$ {dados.get('repasse', 0):.2f}</span>
         </div>
     </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 # ==============================================================================
 # 4. GESTÃO DE ESTADO
@@ -201,14 +170,12 @@ if 'prod_id_selecionado' not in st.session_state: st.session_state.prod_id_selec
 with st.sidebar:
     st.title("🚀 Market Manager")
     st.markdown("---")
-    
-    st.subheader("⚙️ Parâmetros")
     canal = st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"])
     
+    st.caption("Tributos & Logística")
     c1, c2 = st.columns(2)
     icms_venda = input_float("ICMS (%)", 18.0, "icms_v")
     difal = input_float("DIFAL (%)", 0.0, "difal")
-    
     c3, c4 = st.columns(2)
     peso = input_float("Peso (Kg)", 0.3, "peso")
     armaz = input_float("Armaz. (%)", 0.0, "armaz")
@@ -224,64 +191,57 @@ tab1, tab2 = st.tabs(["🧮 Calculadora", "📝 Cadastro (DB)"])
 
 with tab1:
     st.markdown(f"### 🏷️ Simulação: {canal}")
-    if st.session_state.custo_final <= 0:
-        st.warning("⚠️ Defina o custo na aba 'Cadastro'.")
+    if st.session_state.custo_final <= 0: st.warning("⚠️ Defina o custo na aba 'Cadastro'.")
 
     tipo_calculo = st.radio("Objetivo:", ["🎯 Margem (%)", "💵 Preço Fixo (R$)"], horizontal=True)
     modo = "margem" if "Margem" in tipo_calculo else "preco"
     impostos = {'icms': icms_venda, 'difal': difal}
 
     if "Mercado Livre" in canal:
-        col_classico, col_premium = st.columns(2)
-        
-        with col_classico:
+        col_c, col_p = st.columns(2)
+        with col_c:
             st.markdown("#### 🔹 Clássico")
             c1, c2 = st.columns(2)
             com_c = input_float("Comissão (%)", 11.5, "com_cla")
             marg_c = input_float("Margem (%)", 15.0, "marg_cla")
-            
             if modo == "preco":
                 pr_c = input_float("Preço (R$)", 100.0, "pr_cla")
                 res_c = calcular_cenario(0, pr_c, com_c, "preco", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
             else:
                 res_c = calcular_cenario(marg_c, 0, com_c, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
-            
             exibir_card_compacto("Sugestão Clássico", res_c)
 
-        with col_premium:
+        with col_p:
             st.markdown("#### 🔸 Premium")
             p1, p2 = st.columns(2)
             com_p = input_float("Comissão (%)", 16.5, "com_pre")
             marg_p = input_float("Margem (%)", 15.0, "marg_pre")
-            
             if modo == "preco":
                 pr_p = input_float("Preço (R$)", 110.0, "pr_pre")
                 res_p = calcular_cenario(0, pr_p, com_p, "preco", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
             else:
                 res_p = calcular_cenario(marg_p, 0, com_p, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
-            
             exibir_card_compacto("Sugestão Premium", res_p)
-
     else:
-        col_unico, _ = st.columns([1, 1])
-        with col_unico:
+        col_u, _ = st.columns([1, 1])
+        with col_u:
             st.markdown(f"#### 🛍️ {canal}")
             cc1, cc2 = st.columns(2)
             com_u = input_float("Comissão (%)", 14.0, "com_uni")
             marg_u = input_float("Margem (%)", 15.0, "marg_uni")
-            
             if modo == "preco":
                 pr_u = input_float("Preço (R$)", 100.0, "pr_uni")
                 res_u = calcular_cenario(0, pr_u, com_u, "preco", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
             else:
                 res_u = calcular_cenario(marg_u, 0, com_u, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
-            
             exibir_card_compacto(f"Sugestão {canal}", res_u)
 
 with tab2:
     st.markdown("### ☁️ Gestão de Custos")
-
-    df_prods = run_query("SELECT id, sku, nome, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf FROM produtos ORDER BY nome ASC")
+    
+    # Busca com campo 'fornecedor'
+    query_load = "SELECT id, sku, nome, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, fornecedor FROM produtos ORDER BY nome ASC"
+    df_prods = run_query(query_load)
     opcoes_busca = ["✨ Novo Produto"]
     mapa_dados = {}
     
@@ -302,6 +262,9 @@ with tab2:
             st.session_state['in_nome'] = str(d['nome'])
             st.session_state['in_nf'] = str(d['nro_nf']) if d['nro_nf'] else ""
             st.session_state['in_qtd'] = int(d['quantidade'])
+            # NOVO: Carrega Fornecedor
+            st.session_state['in_forn'] = str(d['fornecedor']) if d['fornecedor'] else ""
+            
             st.session_state['pc_cad'] = str(d['preco_partida'])
             st.session_state['ipi_cad'] = str(d['ipi_percent'])
             st.session_state['icmsp_cad'] = str(d['icms_percent'])
@@ -316,13 +279,18 @@ with tab2:
     
     with col_form:
         with st.container(border=True):
-            st.caption("Dados e Custos")
+            st.caption("Dados Cadastrais")
             c1, c2 = st.columns(2)
             sku_val = c1.text_input("SKU", key="in_sku")
             nome_val = c2.text_input("Nome", key="in_nome")
+            
             c3, c4 = st.columns(2)
-            nf_val = c3.text_input("NF", key="in_nf")
+            # NOVO: Campo Fornecedor
+            forn_val = c3.text_input("Fornecedor", key="in_forn")
             qtd_val = c4.number_input("Qtd", min_value=1, key="in_qtd")
+
+            st.caption("Custos & NF")
+            nf_val = st.text_input("NF/Documento", key="in_nf")
 
             l_real = st.toggle("Lucro Real", True)
             r1, r2, r3 = st.columns(3)
@@ -347,9 +315,10 @@ with tab2:
             if b2.button("💾 Salvar Novo", type="primary", use_container_width=True):
                 if sku_val and nome_val:
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    sql = """INSERT INTO produtos (sku, nome, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, data_compra) 
-                             VALUES (:sku, :nome, :nf, :qtd, :pp, :ipi, :icms, :pf, :dt)"""
-                    params = {"sku": sku_val, "nome": nome_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "dt": date.today()}
+                    # INSERT COM FORNECEDOR
+                    sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, data_compra) 
+                             VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :dt)"""
+                    params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "dt": date.today()}
                     if run_command(sql, params):
                         st.toast("Salvo!", icon="☁️")
                         time.sleep(1)
@@ -358,9 +327,10 @@ with tab2:
             if st.session_state.prod_id_selecionado:
                 if b3.button("✏️ Atualizar", use_container_width=True):
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    sql = """UPDATE produtos SET sku=:sku, nome=:nome, nro_nf=:nf, quantidade=:qtd, 
+                    # UPDATE COM FORNECEDOR
+                    sql = """UPDATE produtos SET sku=:sku, nome=:nome, fornecedor=:forn, nro_nf=:nf, quantidade=:qtd, 
                              preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf WHERE id=:id"""
-                    params = {"sku": sku_val, "nome": nome_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "id": st.session_state.prod_id_selecionado}
+                    params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "id": st.session_state.prod_id_selecionado}
                     if run_command(sql, params):
                         st.toast("Atualizado!", icon="🔄")
                         time.sleep(1)
