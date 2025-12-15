@@ -6,12 +6,12 @@ st.set_page_config(page_title="Histórico de Compras", page_icon="🛍️", layo
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.5rem !important; }
+    /* Ajuste do topo para não cortar */
+    .block-container { padding-top: 3rem !important; }
     .label-info { font-size: 14px; color: #555; font-weight: bold; }
     .value-info { font-size: 18px; color: #000; }
 </style>
 """, unsafe_allow_html=True)
-
 # ==============================================================================
 # 1. CONEXÃO AWS
 # ==============================================================================
