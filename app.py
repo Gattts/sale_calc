@@ -5,22 +5,22 @@ from datetime import date
 import time
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILO (AJUSTE FINO DE ESPAÇAMENTO)
+# 1. CONFIGURAÇÃO E ESTILO (CSS AJUSTADO)
 # ==============================================================================
 st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="🚀")
 
 st.markdown("""
 <style>
-    /* 1. Ajuste do Topo: 3rem evita cortar, mas mantém compacto */
+    /* 1. Ajuste do Topo */
     .block-container {
         padding-top: 3rem !important;
         padding-bottom: 1rem !important;
     }
     
-    /* 2. Estilo dos Botões */
+    /* 2. Botões */
     .stButton>button { border-radius: 8px; font-weight: bold; }
     
-    /* 3. Cards de Resultado (Compactos) */
+    /* 3. Cards de Resultado */
     .result-card {
         background-color: #f8f9fa;
         border: 1px solid #e0e0e0;
@@ -28,16 +28,36 @@ st.markdown("""
         padding: 15px;
         text-align: center;
         margin-bottom: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .card-title { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
-    .card-price { font-size: 26px; font-weight: 800; color: #1E88E5; margin: 0; line-height: 1.2; }
-    .card-profit { font-size: 20px; font-weight: bold; color: #2E7D32; margin-top: 5px; }
+    .card-title { 
+        font-size: 14px; 
+        color: #666; 
+        text-transform: uppercase; 
+        letter-spacing: 1px; 
+        margin-bottom: 5px; 
+    }
+    .card-price { 
+        font-size: 26px; 
+        font-weight: 800; 
+        color: #1E88E5; 
+        margin: 0; 
+        line-height: 1.2; 
+    }
+    .card-profit { 
+        font-size: 20px; 
+        font-weight: bold; 
+        color: #2E7D32; 
+        margin-top: 5px; 
+    }
+    /* 4. Rodapé do Card (Frete e Repasse - AUMENTADO) */
     .card-footer { 
-        margin-top: 10px; 
-        padding-top: 10px; 
+        margin-top: 12px; 
+        padding-top: 12px; 
         border-top: 1px solid #ddd; 
-        font-size: 13px; 
-        color: #424242; 
+        font-size: 16px; /* Aumentado de 13px para 16px */
+        font-weight: 600; /* Mais destaque */
+        color: #333; 
         display: flex; 
         justify-content: space-between;
     }
@@ -154,7 +174,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     return {"preco": preco, "lucro": lucro, "margem": margem_real, "repasse": preco - val_mkt, "frete": frete}
 
 def exibir_card_compacto(titulo, dados):
-    """Renderiza o card HTML compacto sem precisar rolar"""
+    """Renderiza o card HTML compacto com fontes ajustadas"""
     html = f"""
     <div class="result-card">
         <div class="card-title">{titulo}</div>
@@ -226,7 +246,6 @@ with tab1:
             else:
                 res_c = calcular_cenario(marg_c, 0, com_c, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
             
-            # CARD COMPACTO CLÁSSICO
             exibir_card_compacto("Sugestão Clássico", res_c)
 
         with col_premium:
@@ -241,11 +260,9 @@ with tab1:
             else:
                 res_p = calcular_cenario(marg_p, 0, com_p, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
             
-            # CARD COMPACTO PREMIUM
             exibir_card_compacto("Sugestão Premium", res_p)
 
     else:
-        # Outros canais
         col_unico, _ = st.columns([1, 1])
         with col_unico:
             st.markdown(f"#### 🛍️ {canal}")
