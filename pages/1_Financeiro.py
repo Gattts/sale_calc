@@ -1,144 +1,90 @@
 import streamlit as st
-import json
 import pandas as pd
-import os
-import sys
-from datetime import date, datetime
+from sqlalchemy import create_engine, text
+from datetime import date
 
-# --- CONFIGURAÇÃO DE CAMINHOS ---
-raiz_projeto = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(raiz_projeto)
+st.set_page_config(page_title="Financeiro AWS", page_icon="💰", layout="wide")
 
-from gerar_totais_csv import main as gerar_dados
+# --- CONEXÃO ---
+DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
+DB_USER = "admin"
+DB_PASS = "Sigmacomjp25"
+DB_NAME = "marketmanager"
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Financeiro", page_icon="💰", layout="wide")
+@st.cache_resource
+def get_engine():
+    return create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
 
-# --- FUNÇÕES ---
-def carregar_dados():
-    arquivo_json = os.path.join(raiz_projeto, 'totais_financeiro.json')
-    
-    if not os.path.exists(arquivo_json):
-        gerar_dados()
-        
+def carregar_financeiro():
+    """Busca contas a pagar do banco AWS"""
+    query = """
+        SELECT fornecedor, nro_documento, vencimento, valor, situacao 
+        FROM contas_pagar 
+        ORDER BY vencimento DESC
+    """
     try:
-        with open(arquivo_json, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        st.error("JSON não encontrado.")
-        return None
+        engine = get_engine()
+        with engine.connect() as conn:
+            return pd.read_sql(text(query), conn)
+    except Exception as e:
+        st.error(f"Erro ao buscar dados: {e}")
+        return pd.DataFrame()
 
-def destacar_situacao(val):
-    """Define as cores da tabela baseado no texto da célula"""
-    color = ''
-    font_color = 'black'
-    font_weight = 'normal'
-    
-    if val == 'Pago':
-        color = '#d4edda' # Verde claro
-        font_color = '#155724'
-        font_weight = 'bold'
-    elif val == 'Atrasado':
-        color = '#f8d7da' # Vermelho claro
-        font_color = '#721c24'
-        font_weight = 'bold'
-    elif val == 'Aberto':
-        color = '#fff3cd' # Amarelo claro
-        font_color = '#856404'
-        font_weight = 'bold'
-        
-    return f'background-color: {color}; color: {font_color}; font-weight: {font_weight};'
+def style_status(v):
+    """Estiliza a tabela"""
+    if v == 'Pago': return 'background-color: #d4edda; color: green; font-weight: bold;'
+    if v == 'Atrasado': return 'background-color: #f8d7da; color: red; font-weight: bold;'
+    return 'background-color: #fff3cd; color: #856404;'
 
-# --- INTERFACE ---
-st.title("📊 Gestão de Contas a Pagar")
+# --- LÓGICA ---
+st.title("📊 Contas a Pagar (Nuvem)")
 
-if st.button("🔄 Atualizar Dados"):
-    with st.spinner('Processando...'):
-        gerar_dados()
-        st.rerun()
+if st.button("🔄 Atualizar"):
+    st.cache_data.clear()
+    st.rerun()
 
-dados = carregar_dados()
+df = carregar_financeiro()
 
-if dados:
-    # Carrega dados brutos
-    df = pd.DataFrame(dados['grid_detalhes'])
-
-    # ==============================================================================
-    # CORREÇÃO CRÍTICA DE DATAS E STATUS
-    # ==============================================================================
-    
-    # 1. Converter a coluna 'vencimento' (que vem como texto) para DATA REAL
-    df['vencimento_dt'] = pd.to_datetime(df['vencimento'], errors='coerce').dt.date
-    
-    # 2. Pega a data de hoje
+if not df.empty:
+    # 1. Garante que vencimento é Data
+    df['vencimento'] = pd.to_datetime(df['vencimento']).dt.date
     hoje = date.today()
 
-    # 3. Função Lógica de Status
-    def recalcular_status(row):
-        # Se no CSV já diz "Pago", confiamos no CSV
+    # 2. Recalcula Status (Lógica Inteligente)
+    def definir_status(row):
+        # Se no banco já diz 'Pago', mantém
         if str(row['situacao']).strip().lower() == 'pago':
             return 'Pago'
-        
-        # Se não tem data de vencimento válida, consideramos Aberto
-        if pd.isna(row['vencimento_dt']):
-            return 'Aberto'
-            
-        # Lógica de Atraso
-        # Se a data de vencimento é MENOR que hoje -> ATRASADO
-        if row['vencimento_dt'] < hoje:
+        # Se a data venceu e não está pago -> Atrasado
+        if row['vencimento'] < hoje:
             return 'Atrasado'
-        else:
-            return 'Aberto'
+        return 'Aberto'
 
-    # 4. Aplica a lógica linha a linha criando uma NOVA coluna 'status_real'
-    df['status_real'] = df.apply(recalcular_status, axis=1)
+    df['Status Real'] = df.apply(definir_status, axis=1)
+
+    # 3. Métricas
+    c1, c2, c3, c4 = st.columns(4)
+    total = df['valor'].sum()
+    atrasado = df[df['Status Real'] == 'Atrasado']['valor'].sum()
+    aberto = df[df['Status Real'] == 'Aberto']['valor'].sum()
+    pago = df[df['Status Real'] == 'Pago']['valor'].sum()
+
+    c1.metric("Total", f"R$ {total:,.2f}")
+    c2.metric("⚠️ Atrasado", f"R$ {atrasado:,.2f}", delta="-Vencido")
+    c3.metric("📅 A Vencer", f"R$ {aberto:,.2f}")
+    c4.metric("✅ Pago", f"R$ {pago:,.2f}")
+
+    # 4. Tabela Colorida
+    # Mostramos apenas colunas úteis
+    df_show = df[['fornecedor', 'nro_documento', 'vencimento', 'valor', 'Status Real']].copy()
+    df_show.columns = ['Fornecedor', 'Doc', 'Vencimento', 'Valor', 'Situação']
     
-    # ==============================================================================
-
-    # --- FILTROS (SIDEBAR) ---
-    st.sidebar.header("Filtros Avançados")
-    
-    # Usamos a coluna NOVA 'status_real' para os filtros e gráficos
-    todas_situacoes = df['status_real'].unique()
-    todos_fornecedores = df['fornecedor'].unique()
-    
-    sel_fornecedor = st.sidebar.multiselect("Fornecedor", todos_fornecedores, default=todos_fornecedores)
-    sel_situacao = st.sidebar.multiselect("Situação (Calculada)", todas_situacoes, default=todas_situacoes)
-
-    # Filtra o DataFrame usando o status recalculado
-    df_final = df[
-        (df['fornecedor'].isin(sel_fornecedor)) & 
-        (df['status_real'].isin(sel_situacao))
-    ]
-
-    # --- KPIs (INDICADORES) ---
-    # Agora os totais vão bater com a realidade (Atrasado vs Aberto)
-    col1, col2, col3, col4 = st.columns(4)
-    
-    total_filtrado = df_final['valor'].sum()
-    val_atrasado = df_final[df_final['status_real'] == 'Atrasado']['valor'].sum()
-    val_aberto = df_final[df_final['status_real'] == 'Aberto']['valor'].sum()
-    val_pago = df_final[df_final['status_real'] == 'Pago']['valor'].sum()
-
-    col1.metric("Total Visualizado", f"R$ {total_filtrado:,.2f}")
-    col2.metric("⚠️ Vencidos/Atrasados", f"R$ {val_atrasado:,.2f}", delta="-Atenção" if val_atrasado > 0 else None)
-    col3.metric("📅 A Vencer (Aberto)", f"R$ {val_aberto:,.2f}")
-    col4.metric("✅ Realizados (Pago)", f"R$ {val_pago:,.2f}")
-
-    st.divider()
-
-    # --- GRID COLORIDA ---
-    # Mostramos a coluna 'status_real' no lugar da 'situacao' original do CSV
-    df_display = df_final[['fornecedor', 'nro_documento', 'vencimento', 'valor', 'status_real']].copy()
-    
-    # Renomeia para ficar bonito na tela
-    df_display.columns = ['Fornecedor', 'Documento', 'Vencimento', 'Valor', 'Situação Atual']
-
-    # Aplica a estilização (Cores)
     st.dataframe(
-        df_display.style.map(destacar_situacao, subset=['Situação Atual'])
-        .format({"Valor": "R$ {:,.2f}"}), 
+        df_show.style.map(style_status, subset=['Situação'])
+        .format({"Valor": "R$ {:,.2f}"}),
         use_container_width=True,
         height=600,
         hide_index=True
     )
+else:
+    st.info("Nenhum registro encontrado no banco de dados.")
