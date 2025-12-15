@@ -1,1 +1,7 @@
 sku,nome,preco_partida,ipi_percent,icms_percent,preco_final,nro_nf,data_compra,quantidade
+SKU001,Monitor 24 Dell,800.00,10,18,1038.40,NF-1020,2025-10-01,10
+SKU001,Monitor 24 Dell,750.00,10,18,973.50,NF-0998,2025-09-15,5
+SKU001,Monitor 24 Dell,820.00,10,18,1064.36,NF-0850,2025-08-10,20
+SKU002,Teclado Mecânico,150.00,0,12,168.00,NF-1021,2025-10-05,50
+SKU002,Teclado Mecânico,145.00,0,12,162.40,NF-0900,2025-09-01,30
+SKU003,Mouse Logi,80.00,5,18,99.20,NF-1022,2025-10-06,100
