@@ -23,11 +23,22 @@ TABELA_FRETE_ML = {
 # ==============================================================================
 
 def input_float(label, value, key, step=None):
-    """Componente flexível: Aceita texto para permitir vírgula ou ponto."""
-    # Garante que o valor inicial seja string para não quebrar o text_input
+    """
+    Componente flexível e blindado contra erros de tipo (Cache do Streamlit).
+    """
+    # VACINA: Se existir um valor no cache que NÃO seja string (ex: float antigo), converte.
+    if key in st.session_state:
+        try:
+            st.session_state[key] = str(st.session_state[key])
+        except:
+            st.session_state[key] = "0.0"
+
     val_str = st.text_input(label, value=str(value), key=key)
+    
+    # Limpeza: aceita vírgula ou ponto
+    val_limpo = val_str.replace(',', '.').strip()
     try:
-        return float(val_str.replace(',', '.'))
+        return float(val_limpo) if val_limpo else 0.0
     except ValueError:
         return 0.0
 
@@ -53,15 +64,14 @@ def calcular_custo_aquisicao(preco_compra, frete, ipi_pct, outros, st_val, icms_
     credito_cofins = 0.0
     
     if is_lucro_real:
-        # 1. ICMS (Base Cheia)
         c_icms_frete = frete * (icms_frete / 100)
         c_icms_prod = preco_compra * (icms_prod / 100)
         credito_icms = c_icms_frete + c_icms_prod
         
-        # 2. PIS/COFINS (Base Reduzida: Exclui ICMS da base)
+        # Base de cálculo PIS/COFINS (Lei 14.754 - Exclui ICMS)
         base_pis_cofins_prod = preco_compra - c_icms_prod
         base_pis_cofins_frete = frete - c_icms_frete
-        base_total = base_pis_cofins_prod + base_pis_cofins_frete
+        base_total = max(0, base_pis_cofins_prod + base_pis_cofins_frete)
         
         credito_pis = base_total * (pis_pct / 100)
         credito_cofins = base_total * (cofins_pct / 100)
@@ -226,6 +236,7 @@ with st.sidebar:
     canal = st.selectbox("🏪 Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🔵 Magalu", "🟠 KaBuM!", "🌐 Site Próprio"])
     st.markdown("---")
     
+    # --- GESTÃO DE PRODUTOS ---
     st.subheader("📦 Selecionar Produto")
     df_produtos = ler_catalogo()
     opcoes_produtos = ["Teste (Novo Produto)"]
@@ -247,12 +258,11 @@ with st.sidebar:
                     item_data = item_data.sort_values(by='data_compra', ascending=False)
                 ultimo_registro = item_data.iloc[0]
                 
-                # --- CORREÇÃO AQUI ---
-                # Converter para string antes de jogar no session_state, pois o input_float (text_input) espera string
+                # --- CORREÇÃO DO ERRO ---
+                # Forçamos a conversão para STRING para que o input_float aceite
                 st.session_state['pc_cad'] = str(float(ultimo_registro.get('preco_partida', 0.0)))
                 st.session_state['ipi_cad'] = str(float(ultimo_registro.get('ipi_percent', 0.0)))
                 st.session_state['icmsp_cad'] = str(float(ultimo_registro.get('icms_percent', 0.0)))
-                
                 st.success("Valores carregados!")
     
     custo_display = st.session_state.get('custo_produto_final', 0.0)
@@ -268,6 +278,19 @@ with st.sidebar:
     col_l1, col_l2 = st.columns(2)
     peso_input = input_float("Peso (Kg)", 0.3, key="peso_input")
     armazenagem_pct = input_float("Armaz. (%)", 0.0, key="armazenagem_pct")
+
+    # --- BOTÃO DE BACKUP PARA GITHUB (WORKAROUND) ---
+    st.markdown("---")
+    st.caption("☁️ AVISO: O sistema roda em nuvem temporária. Para não perder dados, baixe o CSV abaixo e faça backup.")
+    if os.path.exists("produtos.csv"):
+        with open("produtos.csv", "rb") as file:
+            st.download_button(
+                label="📥 Baixar Backup CSV",
+                data=file,
+                file_name="produtos.csv",
+                mime="text/csv",
+                help="Baixe este arquivo periodicamente para garantir que seus dados não sejam perdidos se o site reiniciar."
+            )
 
 # CSS
 css_variables = "--primary-color: #1e3a8a; --secondary-color: #2c3e50; --card-bg: #ffffff; --text-color: #333; --text-muted: #666; --border-color: #e0e0e0; --success-color: #27ae60; --danger-color: #ef4444; --hover-bg: #f8f9fa; --dotted-color: #ccc;"
