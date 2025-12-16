@@ -120,47 +120,78 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     difal = difal_pct / 100
     pis, cofins = 0.0165, 0.0760
     
-    # Taxas Variáveis
+    # -------------------------------------------------------------
+    # 1. DEFINIÇÃO DAS VARIÁVEIS DE CUSTO
+    # -------------------------------------------------------------
+    # Percentual Total sobre Venda Bruta (Taxas Variáveis)
+    # Soma: ICMS + DIFAL + PIS/COFINS (sobre base reduzida) + Comissão Mkt + Armazenagem Var.
     taxa_imposto_total = icms + difal + ((1-icms) * (pis + cofins))
+    perc_variaveis = taxa_imposto_total + (comissao/100) + (armaz/100 if not is_full else 0.0)
     
-    frete, taxa_extra, custo_fixo_extra, taxa_var_extra = 0.0, 0.0, 0.0, 0.0
-    if is_full: custo_fixo_extra += custo_final * (armaz/100)
-    else: taxa_var_extra += armaz
+    # Custos Fixos (Valor em Reais)
+    frete, taxa_extra, custo_fixo_extra = 0.0, 0.0, 0.0
+    
+    if is_full: 
+        custo_fixo_extra += custo_final * (armaz/100) # Se Full, armaz é custo fixo
     
     if "Shopee" in canal: taxa_extra += 4.00 
     elif "Mercado Livre" in canal:
         if modo == "preco": frete = obter_frete_ml(preco_manual, peso)
-        else: frete = obter_frete_ml(custo_final * 1.5, peso)
+        else: frete = obter_frete_ml(custo_final * 1.5, peso) # Chute inicial
     
+    custos_fixos_totais = custo_final + frete + taxa_extra + custo_fixo_extra
+
+    # -------------------------------------------------------------
+    # 2. CÁLCULO DO PREÇO (MARKUP)
+    # -------------------------------------------------------------
     if modo == "margem":
-        divisor = 1 - (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100) + (margem_alvo/100))
-        numerador = custo_final + frete + taxa_extra + custo_fixo_extra
-        preco = numerador / max(divisor, 0.01)
+        # Fórmula Margem Líquida: Preço = Custos Fixos / (1 - Taxas Variáveis - Margem Alvo)
+        margem_decimal = margem_alvo / 100
+        divisor = 1 - (perc_variaveis + margem_decimal)
+        
+        # Proteção contra divisor zero ou negativo (margem impossível)
+        if divisor <= 0: divisor = 0.01 
+        
+        preco = custos_fixos_totais / divisor
+        
+        # Ajuste Fino de Frete ML (Recalcula com o preço encontrado)
         if "Mercado Livre" in canal:
             frete_real = obter_frete_ml(preco, peso)
             if frete_real != frete:
-                numerador = custo_final + frete_real + taxa_extra + custo_fixo_extra
-                preco = numerador / max(divisor, 0.01)
+                custos_fixos_totais = custo_final + frete_real + taxa_extra + custo_fixo_extra
+                preco = custos_fixos_totais / divisor
                 frete = frete_real
+        
         margem_real = margem_alvo
+        
     else:
+        # Modo Preço Fixo (Calcula quanto sobra de margem)
         preco = preco_manual
-        custos_variaveis = preco * (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100))
-        custos_fixos = frete + taxa_extra + custo_final + custo_fixo_extra
-        margem_real = ((preco - custos_variaveis - custos_fixos) / preco * 100) if preco > 0 else 0
+        if "Mercado Livre" in canal:
+            frete = obter_frete_ml(preco, peso)
+            custos_fixos_totais = custo_final + frete + taxa_extra + custo_fixo_extra
+            
+        custos_variaveis_totais = preco * perc_variaveis
+        lucro_bruto = preco - custos_variaveis_totais - custos_fixos_totais
+        
+        # Margem = (Lucro / Preço) * 100
+        margem_real = (lucro_bruto / preco * 100) if preco > 0 else 0
 
-    # DETALHAMENTO (Separado para a tabela)
+    # -------------------------------------------------------------
+    # 3. DETALHAMENTO FINAL (EXPLOSÃO DOS VALORES)
+    # -------------------------------------------------------------
     v_icms = preco * icms
     v_difal = preco * difal
     v_pis_cofins = preco * (1-icms) * (pis + cofins)
-    
     v_comissao = preco * (comissao/100)
-    v_taxa_fixa = taxa_extra
-    v_armaz_var = preco * (taxa_var_extra/100)
-    v_full_fixo = custo_fixo_extra
+    v_armaz_var = preco * (armaz/100) if not is_full else 0.0
     
-    repasse = preco - v_comissao - frete - v_taxa_fixa
-    lucro = repasse - (v_icms + v_difal + v_pis_cofins) - custo_final - v_armaz_var - v_full_fixo
+    # Lucro Líquido = Preço - (Tudo que sai do bolso)
+    lucro = preco - (v_icms + v_difal + v_pis_cofins) - v_comissao - frete - taxa_extra - v_armaz_var - custo_fixo_extra - custo_final
+    
+    # Repasse = O que cai na conta do banco (Venda - Taxas do Canal - Impostos Retidos na Fonte se houver)
+    # Aqui consideramos repasse como Venda - (Comissão + Frete + Taxas Mkt)
+    repasse = preco - v_comissao - frete - taxa_extra
 
     return {
         "preco": preco, "lucro": lucro, "margem": margem_real, "repasse": repasse, "frete": frete,
@@ -171,8 +202,8 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
             "v_pis_cofins": v_pis_cofins,
             "v_comissao": v_comissao, "comissao_pct": comissao,
             "v_frete": frete,
-            "v_taxa_fixa": v_taxa_fixa,
-            "v_armaz": v_armaz_var + v_full_fixo,
+            "v_taxa_fixa": taxa_extra,
+            "v_armaz": v_armaz_var + custo_fixo_extra,
             "custo_produto": custo_final
         }
     }
@@ -195,8 +226,6 @@ def exibir_card_compacto(titulo, dados):
     d = dados['detalhes']
     with st.expander("🔎 Ver Extrato Detalhado"):
         
-        # Cria lista de itens linha a linha
-        # Cada item é uma linha da tabela
         tabela_dados = [
             {"Descrição": "➕ Preço de Venda", "Valor": f"R$ {d['venda_bruta']:,.2f}"},
             
@@ -218,7 +247,6 @@ def exibir_card_compacto(titulo, dados):
             {"Descrição": "✅ LUCRO LÍQUIDO", "Valor": f"R$ {dados['lucro']:,.2f}"}
         ]
         
-        # Converte para DataFrame e Exibe
         df_view = pd.DataFrame(tabela_dados)
         st.table(df_view)
 
