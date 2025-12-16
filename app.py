@@ -161,7 +161,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
         else: frete = obter_frete_ml(custo_final * 1.5, peso)
     
     # ---------------------------------------------------------
-    # CÁLCULO REVERSO (MARKUP) OU DIRETO
+    # CÁLCULO
     # ---------------------------------------------------------
     if modo == "margem":
         divisor = 1 - (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100) + (margem_alvo/100))
@@ -182,23 +182,18 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
         margem_real = ((preco - custos_variaveis - custos_fixos) / preco * 100) if preco > 0 else 0
 
     # ---------------------------------------------------------
-    # DETALHAMENTO (EXPLODINDO OS CUSTOS)
+    # DETALHAMENTO
     # ---------------------------------------------------------
-    # 1. Impostos
     v_icms = preco * icms
     v_difal = preco * difal
     v_pis_cofins = preco * (1-icms) * (pis + cofins)
     v_impostos_total = v_icms + v_difal + v_pis_cofins
     
-    # 2. Marketplace
     v_comissao = preco * (comissao/100)
     v_taxa_fixa = taxa_extra
-    
-    # 3. Operacional Extra
     v_armaz_var = preco * (taxa_var_extra/100)
     v_full_fixo = custo_fixo_extra
     
-    # Resultado Final
     repasse = preco - v_comissao - frete - v_taxa_fixa
     lucro = repasse - v_impostos_total - custo_final - v_armaz_var - v_full_fixo
 
@@ -231,39 +226,40 @@ def exibir_card_compacto(titulo, dados):
     </div>
     """, unsafe_allow_html=True)
     
-    # Renderiza Detalhamento (Tabela Explodida)
+    # Renderiza Detalhamento (CORRIGIDO: Removido espaços iniciais para não virar código)
     d = dados['detalhes']
     with st.expander("🔎 Ver Detalhes (Impostos e Taxas)"):
+        # Importante: A string HTML não pode ter identação na esquerda!
         html_table = f"""
-        <table class="detail-table">
-            <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
-            <tr>
-                <td>(+) Preço de Venda</td>
-                <td class="detail-val-blue">R$ {d['venda_bruta']:.2f}</td>
-            </tr>
-            
-            <tr class="detail-header"><td colspan="2">IMPOSTOS ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)</td></tr>
-            <tr><td class="detail-sub">↳ ICMS Próprio</td><td class="detail-val-sub">R$ {d['v_icms']:.2f}</td></tr>
-            <tr><td class="detail-sub">↳ DIFAL</td><td class="detail-val-sub">R$ {d['v_difal']:.2f}</td></tr>
-            <tr><td class="detail-sub">↳ PIS/COFINS (s/ ICMS)</td><td class="detail-val-sub">R$ {d['v_pis_cofins']:.2f}</td></tr>
-            <tr><td style="font-weight:bold;">(-) Total Impostos</td><td class="detail-val-red">R$ {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}</td></tr>
+<table class="detail-table">
+    <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
+    <tr>
+        <td>(+) Preço de Venda</td>
+        <td class="detail-val-blue">R$ {d['venda_bruta']:.2f}</td>
+    </tr>
+    
+    <tr class="detail-header"><td colspan="2">IMPOSTOS ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)</td></tr>
+    <tr><td class="detail-sub">↳ ICMS Próprio</td><td class="detail-val-sub">R$ {d['v_icms']:.2f}</td></tr>
+    <tr><td class="detail-sub">↳ DIFAL</td><td class="detail-val-sub">R$ {d['v_difal']:.2f}</td></tr>
+    <tr><td class="detail-sub">↳ PIS/COFINS (s/ ICMS)</td><td class="detail-val-sub">R$ {d['v_pis_cofins']:.2f}</td></tr>
+    <tr><td style="font-weight:bold;">(-) Total Impostos</td><td class="detail-val-red">R$ {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}</td></tr>
 
-            <tr class="detail-header"><td colspan="2">MARKETPLACE & LOGÍSTICA</td></tr>
-            <tr><td class="detail-sub">↳ Comissão ({d['comissao_pct']:.1f}%)</td><td class="detail-val-sub">R$ {d['v_comissao']:.2f}</td></tr>
-            <tr><td class="detail-sub">↳ Taxa Fixa / Shopee</td><td class="detail-val-sub">R$ {d['v_taxa_fixa']:.2f}</td></tr>
-            <tr><td class="detail-sub">↳ Frete Envio</td><td class="detail-val-sub">R$ {d['v_frete']:.2f}</td></tr>
-            <tr><td class="detail-sub">↳ Armazenagem/Full</td><td class="detail-val-sub">R$ {d['v_armaz']:.2f}</td></tr>
-            <tr><td style="font-weight:bold;">(-) Total Taxas</td><td class="detail-val-red">R$ {d['v_comissao']+d['v_taxa_fixa']+d['v_frete']+d['v_armaz']:.2f}</td></tr>
+    <tr class="detail-header"><td colspan="2">MARKETPLACE & LOGÍSTICA</td></tr>
+    <tr><td class="detail-sub">↳ Comissão ({d['comissao_pct']:.1f}%)</td><td class="detail-val-sub">R$ {d['v_comissao']:.2f}</td></tr>
+    <tr><td class="detail-sub">↳ Taxa Fixa / Shopee</td><td class="detail-val-sub">R$ {d['v_taxa_fixa']:.2f}</td></tr>
+    <tr><td class="detail-sub">↳ Frete Envio</td><td class="detail-val-sub">R$ {d['v_frete']:.2f}</td></tr>
+    <tr><td class="detail-sub">↳ Armazenagem/Full</td><td class="detail-val-sub">R$ {d['v_armaz']:.2f}</td></tr>
+    <tr><td style="font-weight:bold;">(-) Total Taxas</td><td class="detail-val-red">R$ {d['v_comissao']+d['v_taxa_fixa']+d['v_frete']+d['v_armaz']:.2f}</td></tr>
 
-            <tr class="detail-header"><td colspan="2">PRODUTO</td></tr>
-            <tr><td>(-) Custo Mercadoria (CMV)</td><td class="detail-val-red">R$ {d['custo_produto']:.2f}</td></tr>
-            
-            <tr style="border-top: 2px solid #333;">
-                <td style="font-size:14px; font-weight:bold;">(=) LUCRO LÍQUIDO</td>
-                <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
-            </tr>
-        </table>
-        """
+    <tr class="detail-header"><td colspan="2">PRODUTO</td></tr>
+    <tr><td>(-) Custo Mercadoria (CMV)</td><td class="detail-val-red">R$ {d['custo_produto']:.2f}</td></tr>
+    
+    <tr style="border-top: 2px solid #333;">
+        <td style="font-size:14px; font-weight:bold;">(=) LUCRO LÍQUIDO</td>
+        <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
+    </tr>
+</table>
+"""
         st.markdown(html_table, unsafe_allow_html=True)
 
 # ==============================================================================
