@@ -3,7 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import date
 import time
-import textwrap  # Importante para corrigir o HTML
+import textwrap  # <--- ESSENCIAL: Ferramenta que corrige o HTML
 
 # ==============================================================================
 # 1. CONFIGURAÇÃO E ESTILO
@@ -213,10 +213,10 @@ def exibir_card_compacto(titulo, dados):
     </div>
     """, unsafe_allow_html=True)
     
-    # 2. DETALHAMENTO (Com correção de indentação)
+    # 2. DETALHAMENTO COM CORREÇÃO DE TEXTWRAP
     d = dados['detalhes']
     with st.expander("🔎 Ver Detalhes (Impostos e Taxas)"):
-        # textwrap.dedent remove a indentação comum do bloco, evitando que o Markdown ache que é código
+        # Usamos dedent e strip para remover qualquer espaço que cause o erro de exibição
         html_table = textwrap.dedent(f"""
             <table class="detail-table">
                 <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
@@ -246,7 +246,7 @@ def exibir_card_compacto(titulo, dados):
                     <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
                 </tr>
             </table>
-        """)
+        """).strip()
         st.markdown(html_table, unsafe_allow_html=True)
 
 # ==============================================================================
