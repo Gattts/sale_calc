@@ -3,7 +3,6 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import date
 import time
-import textwrap  # <--- ESSENCIAL: Ferramenta que corrige o HTML
 
 # ==============================================================================
 # 1. CONFIGURAÇÃO E ESTILO
@@ -19,7 +18,7 @@ st.markdown("""
     }
     .stButton>button { border-radius: 8px; font-weight: bold; }
     
-    /* Cards de Resultado */
+    /* Cards de Resultado (Mantemos pois funcionam bem) */
     .result-card {
         background-color: #f8f9fa;
         border: 1px solid #e0e0e0;
@@ -37,25 +36,6 @@ st.markdown("""
         font-size: 16px; font-weight: 600; color: #333; 
         display: flex; justify-content: space-between;
     }
-    
-    /* Tabela de Detalhes (Prova Real) */
-    .detail-table {
-        width: 100%;
-        font-size: 13px;
-        border-collapse: collapse;
-        margin-top: 10px;
-        color: #333;
-    }
-    .detail-table td {
-        padding: 3px 0;
-        border-bottom: 1px solid #f0f0f0;
-    }
-    .detail-header { font-weight: bold; background-color: #f9f9f9; padding: 5px; }
-    .detail-sub { padding-left: 15px !important; color: #666; font-size: 12px; }
-    .detail-val-red { color: #d32f2f; text-align: right; }
-    .detail-val-sub { color: #d32f2f; text-align: right; font-size: 12px; }
-    .detail-val-green { color: #388e3c; font-weight: bold; text-align: right; border-top: 1px solid #ccc; }
-    .detail-val-blue { color: #1565C0; font-weight: bold; text-align: right; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,7 +72,7 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. CÁLCULOS DETALHADOS
+# 3. LÓGICA DE NEGÓCIO
 # ==============================================================================
 TABELA_FRETE_ML = {
     "79-99": [(0.3, 11.97), (0.5, 12.87), (1.0, 13.47), (2.0, 14.07), (3.0, 14.97), (4.0, 16.17), (5.0, 17.07), (9.0, 26.67), (13.0, 39.57), (17.0, 44.07), (23.0, 51.57), (30.0, 59.37), (40.0, 61.17), (50.0, 63.27), (60.0, 67.47), (70.0, 72.27), (80.0, 75.57), (90.0, 83.97), (100.0, 95.97), (125.0, 107.37), (150.0, 113.97)],
@@ -200,7 +180,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     }
 
 def exibir_card_compacto(titulo, dados):
-    # 1. CARD PRINCIPAL
+    # 1. CARD PRINCIPAL (Visual Bonito)
     st.markdown(f"""
     <div class="result-card">
         <div class="card-title">{titulo}</div>
@@ -213,41 +193,23 @@ def exibir_card_compacto(titulo, dados):
     </div>
     """, unsafe_allow_html=True)
     
-    # 2. DETALHAMENTO COM CORREÇÃO DE TEXTWRAP
+    # 2. DETALHAMENTO (USANDO TABELA NATIVA DO STREAMLIT - ZERO HTML)
     d = dados['detalhes']
-    with st.expander("🔎 Ver Detalhes (Impostos e Taxas)"):
-        # Usamos dedent e strip para remover qualquer espaço que cause o erro de exibição
-        html_table = textwrap.dedent(f"""
-            <table class="detail-table">
-                <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
-                <tr>
-                    <td>(+) Preço de Venda</td>
-                    <td class="detail-val-blue">R$ {d['venda_bruta']:.2f}</td>
-                </tr>
-                
-                <tr class="detail-header"><td colspan="2">IMPOSTOS ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)</td></tr>
-                <tr><td class="detail-sub">↳ ICMS Próprio</td><td class="detail-val-sub">R$ {d['v_icms']:.2f}</td></tr>
-                <tr><td class="detail-sub">↳ DIFAL</td><td class="detail-val-sub">R$ {d['v_difal']:.2f}</td></tr>
-                <tr><td class="detail-sub">↳ PIS/COFINS (s/ ICMS)</td><td class="detail-val-sub">R$ {d['v_pis_cofins']:.2f}</td></tr>
-                <tr><td style="font-weight:bold;">(-) Total Impostos</td><td class="detail-val-red">R$ {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}</td></tr>
-
-                <tr class="detail-header"><td colspan="2">MARKETPLACE & LOGÍSTICA</td></tr>
-                <tr><td class="detail-sub">↳ Comissão ({d['comissao_pct']:.1f}%)</td><td class="detail-val-sub">R$ {d['v_comissao']:.2f}</td></tr>
-                <tr><td class="detail-sub">↳ Taxa Fixa / Shopee</td><td class="detail-val-sub">R$ {d['v_taxa_fixa']:.2f}</td></tr>
-                <tr><td class="detail-sub">↳ Frete Envio</td><td class="detail-val-sub">R$ {d['v_frete']:.2f}</td></tr>
-                <tr><td class="detail-sub">↳ Armazenagem/Full</td><td class="detail-val-sub">R$ {d['v_armaz']:.2f}</td></tr>
-                <tr><td style="font-weight:bold;">(-) Total Taxas</td><td class="detail-val-red">R$ {d['v_comissao']+d['v_taxa_fixa']+d['v_frete']+d['v_armaz']:.2f}</td></tr>
-
-                <tr class="detail-header"><td colspan="2">PRODUTO</td></tr>
-                <tr><td>(-) Custo Mercadoria (CMV)</td><td class="detail-val-red">R$ {d['custo_produto']:.2f}</td></tr>
-                
-                <tr style="border-top: 2px solid #333;">
-                    <td style="font-size:14px; font-weight:bold;">(=) LUCRO LÍQUIDO</td>
-                    <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
-                </tr>
-            </table>
-        """).strip()
-        st.markdown(html_table, unsafe_allow_html=True)
+    with st.expander("🔎 Ver Extrato Detalhado"):
+        
+        # Criamos os dados estruturados
+        dados_tabela = [
+            {"Item": "➕ Preço de Venda", "Valor (R$)": f"{d['venda_bruta']:.2f}"},
+            {"Item": f"➖ Impostos ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)", "Valor (R$)": f"- {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}"},
+            {"Item": f"➖ Comissão Mkt ({d['comissao_pct']:.1f}%)", "Valor (R$)": f"- {d['v_comissao']:.2f}"},
+            {"Item": "➖ Taxas e Frete", "Valor (R$)": f"- {d['v_frete'] + d['v_taxa_fixa']:.2f}"},
+            {"Item": "➖ Logística/Armaz.", "Valor (R$)": f"- {d['v_armaz']:.2f}"},
+            {"Item": "➖ Custo do Produto", "Valor (R$)": f"- {d['custo_produto']:.2f}"},
+            {"Item": "✅ LUCRO LÍQUIDO", "Valor (R$)": f"{dados['lucro']:.2f}"}
+        ]
+        
+        # Mostra como tabela nativa (Bonita e sem erros de código)
+        st.table(pd.DataFrame(dados_tabela))
 
 # ==============================================================================
 # 4. GESTÃO DE ESTADO
