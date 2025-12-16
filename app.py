@@ -3,6 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import date
 import time
+import textwrap  # Importante para corrigir o HTML
 
 # ==============================================================================
 # 1. CONFIGURAÇÃO E ESTILO
@@ -140,34 +141,22 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     difal = difal_pct / 100
     pis, cofins = 0.0165, 0.0760
     
-    # Taxas Variáveis (impostos e comissões sobre venda bruta)
+    # Taxas Variáveis
     taxa_imposto_total = icms + difal + ((1-icms) * (pis + cofins))
     
-    # Custos Fixos e Variáveis de Logística
     frete, taxa_extra, custo_fixo_extra, taxa_var_extra = 0.0, 0.0, 0.0, 0.0
+    if is_full: custo_fixo_extra += custo_final * (armaz/100)
+    else: taxa_var_extra += armaz
     
-    if is_full: 
-        # Custo Full Fulfillment (Armazenagem sobre custo produto ou fixo)
-        custo_fixo_extra += custo_final * (armaz/100)
-    else: 
-        # Custo Armazenagem Variável (percentual sobre venda)
-        taxa_var_extra += armaz
-    
-    # Regras de Frete/Taxas Específicas
-    if "Shopee" in canal: 
-        taxa_extra += 4.00 
+    if "Shopee" in canal: taxa_extra += 4.00 
     elif "Mercado Livre" in canal:
         if modo == "preco": frete = obter_frete_ml(preco_manual, peso)
         else: frete = obter_frete_ml(custo_final * 1.5, peso)
     
-    # ---------------------------------------------------------
-    # CÁLCULO
-    # ---------------------------------------------------------
     if modo == "margem":
         divisor = 1 - (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100) + (margem_alvo/100))
         numerador = custo_final + frete + taxa_extra + custo_fixo_extra
         preco = numerador / max(divisor, 0.01)
-        
         if "Mercado Livre" in canal:
             frete_real = obter_frete_ml(preco, peso)
             if frete_real != frete:
@@ -181,9 +170,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
         custos_fixos = frete + taxa_extra + custo_final + custo_fixo_extra
         margem_real = ((preco - custos_variaveis - custos_fixos) / preco * 100) if preco > 0 else 0
 
-    # ---------------------------------------------------------
     # DETALHAMENTO
-    # ---------------------------------------------------------
     v_icms = preco * icms
     v_difal = preco * difal
     v_pis_cofins = preco * (1-icms) * (pis + cofins)
@@ -213,7 +200,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     }
 
 def exibir_card_compacto(titulo, dados):
-    # Renderiza Card
+    # 1. CARD PRINCIPAL
     st.markdown(f"""
     <div class="result-card">
         <div class="card-title">{titulo}</div>
@@ -226,40 +213,40 @@ def exibir_card_compacto(titulo, dados):
     </div>
     """, unsafe_allow_html=True)
     
-    # Renderiza Detalhamento (CORRIGIDO: Removido espaços iniciais para não virar código)
+    # 2. DETALHAMENTO (Com correção de indentação)
     d = dados['detalhes']
     with st.expander("🔎 Ver Detalhes (Impostos e Taxas)"):
-        # Importante: A string HTML não pode ter identação na esquerda!
-        html_table = f"""
-<table class="detail-table">
-    <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
-    <tr>
-        <td>(+) Preço de Venda</td>
-        <td class="detail-val-blue">R$ {d['venda_bruta']:.2f}</td>
-    </tr>
-    
-    <tr class="detail-header"><td colspan="2">IMPOSTOS ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)</td></tr>
-    <tr><td class="detail-sub">↳ ICMS Próprio</td><td class="detail-val-sub">R$ {d['v_icms']:.2f}</td></tr>
-    <tr><td class="detail-sub">↳ DIFAL</td><td class="detail-val-sub">R$ {d['v_difal']:.2f}</td></tr>
-    <tr><td class="detail-sub">↳ PIS/COFINS (s/ ICMS)</td><td class="detail-val-sub">R$ {d['v_pis_cofins']:.2f}</td></tr>
-    <tr><td style="font-weight:bold;">(-) Total Impostos</td><td class="detail-val-red">R$ {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}</td></tr>
+        # textwrap.dedent remove a indentação comum do bloco, evitando que o Markdown ache que é código
+        html_table = textwrap.dedent(f"""
+            <table class="detail-table">
+                <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
+                <tr>
+                    <td>(+) Preço de Venda</td>
+                    <td class="detail-val-blue">R$ {d['venda_bruta']:.2f}</td>
+                </tr>
+                
+                <tr class="detail-header"><td colspan="2">IMPOSTOS ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)</td></tr>
+                <tr><td class="detail-sub">↳ ICMS Próprio</td><td class="detail-val-sub">R$ {d['v_icms']:.2f}</td></tr>
+                <tr><td class="detail-sub">↳ DIFAL</td><td class="detail-val-sub">R$ {d['v_difal']:.2f}</td></tr>
+                <tr><td class="detail-sub">↳ PIS/COFINS (s/ ICMS)</td><td class="detail-val-sub">R$ {d['v_pis_cofins']:.2f}</td></tr>
+                <tr><td style="font-weight:bold;">(-) Total Impostos</td><td class="detail-val-red">R$ {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}</td></tr>
 
-    <tr class="detail-header"><td colspan="2">MARKETPLACE & LOGÍSTICA</td></tr>
-    <tr><td class="detail-sub">↳ Comissão ({d['comissao_pct']:.1f}%)</td><td class="detail-val-sub">R$ {d['v_comissao']:.2f}</td></tr>
-    <tr><td class="detail-sub">↳ Taxa Fixa / Shopee</td><td class="detail-val-sub">R$ {d['v_taxa_fixa']:.2f}</td></tr>
-    <tr><td class="detail-sub">↳ Frete Envio</td><td class="detail-val-sub">R$ {d['v_frete']:.2f}</td></tr>
-    <tr><td class="detail-sub">↳ Armazenagem/Full</td><td class="detail-val-sub">R$ {d['v_armaz']:.2f}</td></tr>
-    <tr><td style="font-weight:bold;">(-) Total Taxas</td><td class="detail-val-red">R$ {d['v_comissao']+d['v_taxa_fixa']+d['v_frete']+d['v_armaz']:.2f}</td></tr>
+                <tr class="detail-header"><td colspan="2">MARKETPLACE & LOGÍSTICA</td></tr>
+                <tr><td class="detail-sub">↳ Comissão ({d['comissao_pct']:.1f}%)</td><td class="detail-val-sub">R$ {d['v_comissao']:.2f}</td></tr>
+                <tr><td class="detail-sub">↳ Taxa Fixa / Shopee</td><td class="detail-val-sub">R$ {d['v_taxa_fixa']:.2f}</td></tr>
+                <tr><td class="detail-sub">↳ Frete Envio</td><td class="detail-val-sub">R$ {d['v_frete']:.2f}</td></tr>
+                <tr><td class="detail-sub">↳ Armazenagem/Full</td><td class="detail-val-sub">R$ {d['v_armaz']:.2f}</td></tr>
+                <tr><td style="font-weight:bold;">(-) Total Taxas</td><td class="detail-val-red">R$ {d['v_comissao']+d['v_taxa_fixa']+d['v_frete']+d['v_armaz']:.2f}</td></tr>
 
-    <tr class="detail-header"><td colspan="2">PRODUTO</td></tr>
-    <tr><td>(-) Custo Mercadoria (CMV)</td><td class="detail-val-red">R$ {d['custo_produto']:.2f}</td></tr>
-    
-    <tr style="border-top: 2px solid #333;">
-        <td style="font-size:14px; font-weight:bold;">(=) LUCRO LÍQUIDO</td>
-        <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
-    </tr>
-</table>
-"""
+                <tr class="detail-header"><td colspan="2">PRODUTO</td></tr>
+                <tr><td>(-) Custo Mercadoria (CMV)</td><td class="detail-val-red">R$ {d['custo_produto']:.2f}</td></tr>
+                
+                <tr style="border-top: 2px solid #333;">
+                    <td style="font-size:14px; font-weight:bold;">(=) LUCRO LÍQUIDO</td>
+                    <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
+                </tr>
+            </table>
+        """)
         st.markdown(html_table, unsafe_allow_html=True)
 
 # ==============================================================================
