@@ -11,14 +11,13 @@ st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="�
 
 st.markdown("""
 <style>
-    /* Topo Ajustado */
     .block-container {
         padding-top: 3rem !important;
         padding-bottom: 1rem !important;
     }
     .stButton>button { border-radius: 8px; font-weight: bold; }
     
-    /* Cards de Resultado (Mantemos pois funcionam bem) */
+    /* Cards de Resultado */
     .result-card {
         background-color: #f8f9fa;
         border: 1px solid #e0e0e0;
@@ -150,11 +149,10 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
         custos_fixos = frete + taxa_extra + custo_final + custo_fixo_extra
         margem_real = ((preco - custos_variaveis - custos_fixos) / preco * 100) if preco > 0 else 0
 
-    # DETALHAMENTO
+    # DETALHAMENTO (Separado para a tabela)
     v_icms = preco * icms
     v_difal = preco * difal
     v_pis_cofins = preco * (1-icms) * (pis + cofins)
-    v_impostos_total = v_icms + v_difal + v_pis_cofins
     
     v_comissao = preco * (comissao/100)
     v_taxa_fixa = taxa_extra
@@ -162,7 +160,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     v_full_fixo = custo_fixo_extra
     
     repasse = preco - v_comissao - frete - v_taxa_fixa
-    lucro = repasse - v_impostos_total - custo_final - v_armaz_var - v_full_fixo
+    lucro = repasse - (v_icms + v_difal + v_pis_cofins) - custo_final - v_armaz_var - v_full_fixo
 
     return {
         "preco": preco, "lucro": lucro, "margem": margem_real, "repasse": repasse, "frete": frete,
@@ -180,7 +178,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     }
 
 def exibir_card_compacto(titulo, dados):
-    # 1. CARD PRINCIPAL (Visual Bonito)
+    # 1. CARD PRINCIPAL
     st.markdown(f"""
     <div class="result-card">
         <div class="card-title">{titulo}</div>
@@ -193,23 +191,36 @@ def exibir_card_compacto(titulo, dados):
     </div>
     """, unsafe_allow_html=True)
     
-    # 2. DETALHAMENTO (USANDO TABELA NATIVA DO STREAMLIT - ZERO HTML)
+    # 2. DETALHAMENTO GRANULAR (TABELA SEGURA)
     d = dados['detalhes']
     with st.expander("🔎 Ver Extrato Detalhado"):
         
-        # Criamos os dados estruturados
-        dados_tabela = [
-            {"Item": "➕ Preço de Venda", "Valor (R$)": f"{d['venda_bruta']:.2f}"},
-            {"Item": f"➖ Impostos ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)", "Valor (R$)": f"- {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}"},
-            {"Item": f"➖ Comissão Mkt ({d['comissao_pct']:.1f}%)", "Valor (R$)": f"- {d['v_comissao']:.2f}"},
-            {"Item": "➖ Taxas e Frete", "Valor (R$)": f"- {d['v_frete'] + d['v_taxa_fixa']:.2f}"},
-            {"Item": "➖ Logística/Armaz.", "Valor (R$)": f"- {d['v_armaz']:.2f}"},
-            {"Item": "➖ Custo do Produto", "Valor (R$)": f"- {d['custo_produto']:.2f}"},
-            {"Item": "✅ LUCRO LÍQUIDO", "Valor (R$)": f"{dados['lucro']:.2f}"}
+        # Cria lista de itens linha a linha
+        # Cada item é uma linha da tabela
+        tabela_dados = [
+            {"Descrição": "➕ Preço de Venda", "Valor": f"R$ {d['venda_bruta']:,.2f}"},
+            
+            # IMPOSTOS
+            {"Descrição": f"➖ ICMS ({d['icms_pct']:.1f}%)", "Valor": f"- R$ {d['v_icms']:,.2f}"},
+            {"Descrição": f"➖ DIFAL ({d['difal_pct']:.1f}%)", "Valor": f"- R$ {d['v_difal']:,.2f}"},
+            {"Descrição": "➖ PIS/COFINS (9.25%)", "Valor": f"- R$ {d['v_pis_cofins']:,.2f}"},
+            
+            # MARKETPLACE
+            {"Descrição": f"➖ Comissão Mkt ({d['comissao_pct']:.1f}%)", "Valor": f"- R$ {d['v_comissao']:,.2f}"},
+            {"Descrição": "➖ Taxa Fixa (Shopee/Outros)", "Valor": f"- R$ {d['v_taxa_fixa']:,.2f}"},
+            {"Descrição": "➖ Frete de Envio", "Valor": f"- R$ {d['v_frete']:,.2f}"},
+            {"Descrição": "➖ Armazenagem/Full", "Valor": f"- R$ {d['v_armaz']:,.2f}"},
+            
+            # PRODUTO
+            {"Descrição": "➖ Custo do Produto (CMV)", "Valor": f"- R$ {d['custo_produto']:,.2f}"},
+            
+            # TOTAL
+            {"Descrição": "✅ LUCRO LÍQUIDO", "Valor": f"R$ {dados['lucro']:,.2f}"}
         ]
         
-        # Mostra como tabela nativa (Bonita e sem erros de código)
-        st.table(pd.DataFrame(dados_tabela))
+        # Converte para DataFrame e Exibe
+        df_view = pd.DataFrame(tabela_dados)
+        st.table(df_view)
 
 # ==============================================================================
 # 4. GESTÃO DE ESTADO
