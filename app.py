@@ -36,6 +36,22 @@ st.markdown("""
         font-size: 16px; font-weight: 600; color: #333; 
         display: flex; justify-content: space-between;
     }
+    
+    /* Tabela de Detalhes (Prova Real) */
+    .detail-table {
+        width: 100%;
+        font-size: 14px;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+    .detail-table td {
+        padding: 4px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .detail-row-red { color: #d32f2f; }
+    .detail-row-green { color: #388e3c; font-weight: bold; border-top: 2px solid #ccc; }
+    .detail-label { text-align: left; }
+    .detail-value { text-align: right; font-family: monospace; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -72,7 +88,7 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. CÁLCULOS
+# 3. CÁLCULOS DETALHADOS
 # ==============================================================================
 TABELA_FRETE_ML = {
     "79-99": [(0.3, 11.97), (0.5, 12.87), (1.0, 13.47), (2.0, 14.07), (3.0, 14.97), (4.0, 16.17), (5.0, 17.07), (9.0, 26.67), (13.0, 39.57), (17.0, 44.07), (23.0, 51.57), (30.0, 59.37), (40.0, 61.17), (50.0, 63.27), (60.0, 67.47), (70.0, 72.27), (80.0, 75.57), (90.0, 83.97), (100.0, 95.97), (125.0, 107.37), (150.0, 113.97)],
@@ -118,33 +134,68 @@ def obter_frete_ml(preco, peso):
 def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_final, impostos_venda, peso, is_full, armaz):
     icms, difal = impostos_venda['icms']/100, impostos_venda['difal']/100
     pis, cofins = 0.0165, 0.0760
+    
+    # Impostos sobre a Venda (faturamento)
     taxa_imposto_total = icms + difal + ((1-icms) * (pis + cofins))
+    
     frete, taxa_extra, custo_fixo_extra, taxa_var_extra = 0.0, 0.0, 0.0, 0.0
     if is_full: custo_fixo_extra += custo_final * (armaz/100)
     else: taxa_var_extra += armaz
-    if "Shopee" in canal: taxa_extra += 4.00
+    
+    # Regras de Frete/Taxas Específicas
+    if "Shopee" in canal: 
+        taxa_extra += 4.00 # Taxa fixa Shopee (aprox)
     elif "Mercado Livre" in canal:
         if modo == "preco": frete = obter_frete_ml(preco_manual, peso)
-        else: frete = obter_frete_ml(custo_final * 1.5, peso)
+        else: frete = obter_frete_ml(custo_final * 1.5, peso) # Estimativa inicial
+    
+    # ---------------------------------------------------------
+    # CÁLCULO REVERSO (MARKUP) OU DIRETO
+    # ---------------------------------------------------------
     if modo == "margem":
+        # Fórmula: Preço = (Custos Fixos) / (1 - Taxas Variáveis)
         divisor = 1 - (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100) + (margem_alvo/100))
         numerador = custo_final + frete + taxa_extra + custo_fixo_extra
-        preco = numerador / max(divisor, 0.01)
+        preco = numerador / max(divisor, 0.01) # Evita div por zero
+        
+        # Recalcula frete do ML com o preço real encontrado
         if "Mercado Livre" in canal:
             frete_real = obter_frete_ml(preco, peso)
             if frete_real != frete:
-                preco = (custo_final + frete_real + taxa_extra + custo_fixo_extra) / max(divisor, 0.01)
+                numerador = custo_final + frete_real + taxa_extra + custo_fixo_extra
+                preco = numerador / max(divisor, 0.01)
                 frete = frete_real
         margem_real = margem_alvo
     else:
         preco = preco_manual
-        custos = (preco * (taxa_imposto_total + comissao/100 + taxa_var_extra/100)) + frete + taxa_extra + custo_final + custo_fixo_extra
-        margem_real = ((preco - custos) / preco * 100) if preco > 0 else 0
-    val_mkt = (preco * comissao/100) + frete + taxa_extra
-    lucro = preco * (1 - taxa_imposto_total) - val_mkt - custo_final - custo_fixo_extra
-    return {"preco": preco, "lucro": lucro, "margem": margem_real, "repasse": preco - val_mkt, "frete": frete}
+        custos_variaveis = preco * (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100))
+        custos_fixos = frete + taxa_extra + custo_final + custo_fixo_extra
+        margem_real = ((preco - custos_variaveis - custos_fixos) / preco * 100) if preco > 0 else 0
+
+    # ---------------------------------------------------------
+    # DETALHAMENTO DO CÁLCULO (A PROVA REAL)
+    # ---------------------------------------------------------
+    val_comissao = preco * (comissao/100)
+    val_impostos = preco * taxa_imposto_total
+    val_taxas_extras = taxa_extra + custo_fixo_extra + (preco * (taxa_var_extra/100))
+    lucro = preco - val_impostos - val_comissao - frete - val_taxas_extras - custo_final
+    repasse = preco - val_comissao - frete - val_taxas_extras
+
+    return {
+        "preco": preco, "lucro": lucro, "margem": margem_real, "repasse": repasse, "frete": frete,
+        "detalhes": {
+            "venda_bruta": preco,
+            "impostos": val_impostos,
+            "comissao": val_comissao,
+            "frete_total": frete,
+            "taxas_extras": val_taxas_extras,
+            "custo_produto": custo_final,
+            "lucro_liquido": lucro
+        }
+    }
 
 def exibir_card_compacto(titulo, dados):
+    # Renderiza Card
     st.markdown(f"""
     <div class="result-card">
         <div class="card-title">{titulo}</div>
@@ -156,6 +207,21 @@ def exibir_card_compacto(titulo, dados):
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Renderiza Detalhamento (Expander)
+    d = dados['detalhes']
+    with st.expander("🔎 Ver Memória de Cálculo (Prova Real)"):
+        html_table = f"""
+        <table class="detail-table">
+            <tr><td class="detail-label"><b>(+) Preço Venda</b></td><td class="detail-value"><b>R$ {d['venda_bruta']:.2f}</b></td></tr>
+            <tr><td class="detail-label detail-row-red">(-) Impostos Venda</td><td class="detail-value detail-row-red">R$ {d['impostos']:.2f}</td></tr>
+            <tr><td class="detail-label detail-row-red">(-) Comissão Mkt</td><td class="detail-value detail-row-red">R$ {d['comissao']:.2f}</td></tr>
+            <tr><td class="detail-label detail-row-red">(-) Frete e Taxas</td><td class="detail-value detail-row-red">R$ {d['frete_total'] + d['taxas_extras']:.2f}</td></tr>
+            <tr><td class="detail-label detail-row-red">(-) Custo do Produto</td><td class="detail-value detail-row-red">R$ {d['custo_produto']:.2f}</td></tr>
+            <tr class="detail-row-green"><td class="detail-label">(=) Lucro Líquido</td><td class="detail-value">R$ {d['lucro_liquido']:.2f}</td></tr>
+        </table>
+        """
+        st.markdown(html_table, unsafe_allow_html=True)
 
 # ==============================================================================
 # 4. GESTÃO DE ESTADO
@@ -239,7 +305,6 @@ with tab1:
 with tab2:
     st.markdown("### ☁️ Gestão de Custos")
     
-    # Busca agora INCLUI A COLUNA FORNECEDOR
     query_load = "SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf FROM produtos ORDER BY nome ASC"
     df_prods = run_query(query_load)
     
@@ -261,11 +326,8 @@ with tab2:
             st.session_state.prod_id_selecionado = d['id']
             st.session_state['in_sku'] = str(d['sku'])
             st.session_state['in_nome'] = str(d['nome'])
-            
-            # 🔴 PREENCHIMENTO AUTOMÁTICO DO FORNECEDOR
             forn_raw = d.get('fornecedor')
             st.session_state['in_forn'] = str(forn_raw) if forn_raw and str(forn_raw) != 'None' else ""
-
             st.session_state['in_nf'] = str(d['nro_nf']) if d['nro_nf'] else ""
             st.session_state['in_qtd'] = int(d['quantidade'])
             st.session_state['pc_cad'] = str(d['preco_partida'])
@@ -288,7 +350,6 @@ with tab2:
             nome_val = c2.text_input("Nome", key="in_nome")
             
             c3, c4 = st.columns(2)
-            # O Campo Fornecedor agora usa a key 'in_forn' populada acima
             forn_val = c3.text_input("Fornecedor", key="in_forn")
             qtd_val = c4.number_input("Qtd", min_value=1, key="in_qtd")
 
@@ -318,7 +379,6 @@ with tab2:
             if b2.button("💾 Salvar Novo", type="primary", use_container_width=True):
                 if sku_val and nome_val:
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    # INSERT com Fornecedor
                     sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, data_compra) 
                              VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :dt)"""
                     params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "dt": date.today()}
@@ -330,7 +390,6 @@ with tab2:
             if st.session_state.prod_id_selecionado:
                 if b3.button("✏️ Atualizar", use_container_width=True):
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    # UPDATE com Fornecedor
                     sql = """UPDATE produtos SET sku=:sku, nome=:nome, fornecedor=:forn, nro_nf=:nf, quantidade=:qtd, 
                              preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf WHERE id=:id"""
                     params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "id": st.session_state.prod_id_selecionado}
