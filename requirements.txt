@@ -4,4 +4,3 @@ numpy
 sqlalchemy
 mysql-connector-python
 pymysql
-textwrap
