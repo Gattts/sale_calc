@@ -40,18 +40,21 @@ st.markdown("""
     /* Tabela de Detalhes (Prova Real) */
     .detail-table {
         width: 100%;
-        font-size: 14px;
+        font-size: 13px;
         border-collapse: collapse;
         margin-top: 10px;
+        color: #333;
     }
     .detail-table td {
-        padding: 4px 0;
-        border-bottom: 1px solid #eee;
+        padding: 3px 0;
+        border-bottom: 1px solid #f0f0f0;
     }
-    .detail-row-red { color: #d32f2f; }
-    .detail-row-green { color: #388e3c; font-weight: bold; border-top: 2px solid #ccc; }
-    .detail-label { text-align: left; }
-    .detail-value { text-align: right; font-family: monospace; }
+    .detail-header { font-weight: bold; background-color: #f9f9f9; padding: 5px; }
+    .detail-sub { padding-left: 15px !important; color: #666; font-size: 12px; }
+    .detail-val-red { color: #d32f2f; text-align: right; }
+    .detail-val-sub { color: #d32f2f; text-align: right; font-size: 12px; }
+    .detail-val-green { color: #388e3c; font-weight: bold; text-align: right; border-top: 1px solid #ccc; }
+    .detail-val-blue { color: #1565C0; font-weight: bold; text-align: right; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,33 +135,39 @@ def obter_frete_ml(preco, peso):
     return TABELA_FRETE_ML[faixa][-1][1]
 
 def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_final, impostos_venda, peso, is_full, armaz):
-    icms, difal = impostos_venda['icms']/100, impostos_venda['difal']/100
+    icms_pct, difal_pct = impostos_venda['icms'], impostos_venda['difal']
+    icms = icms_pct / 100
+    difal = difal_pct / 100
     pis, cofins = 0.0165, 0.0760
     
-    # Impostos sobre a Venda (faturamento)
+    # Taxas Variáveis (impostos e comissões sobre venda bruta)
     taxa_imposto_total = icms + difal + ((1-icms) * (pis + cofins))
     
+    # Custos Fixos e Variáveis de Logística
     frete, taxa_extra, custo_fixo_extra, taxa_var_extra = 0.0, 0.0, 0.0, 0.0
-    if is_full: custo_fixo_extra += custo_final * (armaz/100)
-    else: taxa_var_extra += armaz
+    
+    if is_full: 
+        # Custo Full Fulfillment (Armazenagem sobre custo produto ou fixo)
+        custo_fixo_extra += custo_final * (armaz/100)
+    else: 
+        # Custo Armazenagem Variável (percentual sobre venda)
+        taxa_var_extra += armaz
     
     # Regras de Frete/Taxas Específicas
     if "Shopee" in canal: 
-        taxa_extra += 4.00 # Taxa fixa Shopee (aprox)
+        taxa_extra += 4.00 
     elif "Mercado Livre" in canal:
         if modo == "preco": frete = obter_frete_ml(preco_manual, peso)
-        else: frete = obter_frete_ml(custo_final * 1.5, peso) # Estimativa inicial
+        else: frete = obter_frete_ml(custo_final * 1.5, peso)
     
     # ---------------------------------------------------------
     # CÁLCULO REVERSO (MARKUP) OU DIRETO
     # ---------------------------------------------------------
     if modo == "margem":
-        # Fórmula: Preço = (Custos Fixos) / (1 - Taxas Variáveis)
         divisor = 1 - (taxa_imposto_total + (comissao/100) + (taxa_var_extra/100) + (margem_alvo/100))
         numerador = custo_final + frete + taxa_extra + custo_fixo_extra
-        preco = numerador / max(divisor, 0.01) # Evita div por zero
+        preco = numerador / max(divisor, 0.01)
         
-        # Recalcula frete do ML com o preço real encontrado
         if "Mercado Livre" in canal:
             frete_real = obter_frete_ml(preco, peso)
             if frete_real != frete:
@@ -173,24 +182,38 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
         margem_real = ((preco - custos_variaveis - custos_fixos) / preco * 100) if preco > 0 else 0
 
     # ---------------------------------------------------------
-    # DETALHAMENTO DO CÁLCULO (A PROVA REAL)
+    # DETALHAMENTO (EXPLODINDO OS CUSTOS)
     # ---------------------------------------------------------
-    val_comissao = preco * (comissao/100)
-    val_impostos = preco * taxa_imposto_total
-    val_taxas_extras = taxa_extra + custo_fixo_extra + (preco * (taxa_var_extra/100))
-    lucro = preco - val_impostos - val_comissao - frete - val_taxas_extras - custo_final
-    repasse = preco - val_comissao - frete - val_taxas_extras
+    # 1. Impostos
+    v_icms = preco * icms
+    v_difal = preco * difal
+    v_pis_cofins = preco * (1-icms) * (pis + cofins)
+    v_impostos_total = v_icms + v_difal + v_pis_cofins
+    
+    # 2. Marketplace
+    v_comissao = preco * (comissao/100)
+    v_taxa_fixa = taxa_extra
+    
+    # 3. Operacional Extra
+    v_armaz_var = preco * (taxa_var_extra/100)
+    v_full_fixo = custo_fixo_extra
+    
+    # Resultado Final
+    repasse = preco - v_comissao - frete - v_taxa_fixa
+    lucro = repasse - v_impostos_total - custo_final - v_armaz_var - v_full_fixo
 
     return {
         "preco": preco, "lucro": lucro, "margem": margem_real, "repasse": repasse, "frete": frete,
         "detalhes": {
             "venda_bruta": preco,
-            "impostos": val_impostos,
-            "comissao": val_comissao,
-            "frete_total": frete,
-            "taxas_extras": val_taxas_extras,
-            "custo_produto": custo_final,
-            "lucro_liquido": lucro
+            "v_icms": v_icms, "icms_pct": icms_pct,
+            "v_difal": v_difal, "difal_pct": difal_pct,
+            "v_pis_cofins": v_pis_cofins,
+            "v_comissao": v_comissao, "comissao_pct": comissao,
+            "v_frete": frete,
+            "v_taxa_fixa": v_taxa_fixa,
+            "v_armaz": v_armaz_var + v_full_fixo,
+            "custo_produto": custo_final
         }
     }
 
@@ -208,17 +231,37 @@ def exibir_card_compacto(titulo, dados):
     </div>
     """, unsafe_allow_html=True)
     
-    # Renderiza Detalhamento (Expander)
+    # Renderiza Detalhamento (Tabela Explodida)
     d = dados['detalhes']
-    with st.expander("🔎 Ver Memória de Cálculo (Prova Real)"):
+    with st.expander("🔎 Ver Detalhes (Impostos e Taxas)"):
         html_table = f"""
         <table class="detail-table">
-            <tr><td class="detail-label"><b>(+) Preço Venda</b></td><td class="detail-value"><b>R$ {d['venda_bruta']:.2f}</b></td></tr>
-            <tr><td class="detail-label detail-row-red">(-) Impostos Venda</td><td class="detail-value detail-row-red">R$ {d['impostos']:.2f}</td></tr>
-            <tr><td class="detail-label detail-row-red">(-) Comissão Mkt</td><td class="detail-value detail-row-red">R$ {d['comissao']:.2f}</td></tr>
-            <tr><td class="detail-label detail-row-red">(-) Frete e Taxas</td><td class="detail-value detail-row-red">R$ {d['frete_total'] + d['taxas_extras']:.2f}</td></tr>
-            <tr><td class="detail-label detail-row-red">(-) Custo do Produto</td><td class="detail-value detail-row-red">R$ {d['custo_produto']:.2f}</td></tr>
-            <tr class="detail-row-green"><td class="detail-label">(=) Lucro Líquido</td><td class="detail-value">R$ {d['lucro_liquido']:.2f}</td></tr>
+            <tr class="detail-header"><td colspan="2">FATURAMENTO</td></tr>
+            <tr>
+                <td>(+) Preço de Venda</td>
+                <td class="detail-val-blue">R$ {d['venda_bruta']:.2f}</td>
+            </tr>
+            
+            <tr class="detail-header"><td colspan="2">IMPOSTOS ({d['icms_pct']:.0f}% ICMS + {d['difal_pct']:.0f}% DIFAL)</td></tr>
+            <tr><td class="detail-sub">↳ ICMS Próprio</td><td class="detail-val-sub">R$ {d['v_icms']:.2f}</td></tr>
+            <tr><td class="detail-sub">↳ DIFAL</td><td class="detail-val-sub">R$ {d['v_difal']:.2f}</td></tr>
+            <tr><td class="detail-sub">↳ PIS/COFINS (s/ ICMS)</td><td class="detail-val-sub">R$ {d['v_pis_cofins']:.2f}</td></tr>
+            <tr><td style="font-weight:bold;">(-) Total Impostos</td><td class="detail-val-red">R$ {d['v_icms']+d['v_difal']+d['v_pis_cofins']:.2f}</td></tr>
+
+            <tr class="detail-header"><td colspan="2">MARKETPLACE & LOGÍSTICA</td></tr>
+            <tr><td class="detail-sub">↳ Comissão ({d['comissao_pct']:.1f}%)</td><td class="detail-val-sub">R$ {d['v_comissao']:.2f}</td></tr>
+            <tr><td class="detail-sub">↳ Taxa Fixa / Shopee</td><td class="detail-val-sub">R$ {d['v_taxa_fixa']:.2f}</td></tr>
+            <tr><td class="detail-sub">↳ Frete Envio</td><td class="detail-val-sub">R$ {d['v_frete']:.2f}</td></tr>
+            <tr><td class="detail-sub">↳ Armazenagem/Full</td><td class="detail-val-sub">R$ {d['v_armaz']:.2f}</td></tr>
+            <tr><td style="font-weight:bold;">(-) Total Taxas</td><td class="detail-val-red">R$ {d['v_comissao']+d['v_taxa_fixa']+d['v_frete']+d['v_armaz']:.2f}</td></tr>
+
+            <tr class="detail-header"><td colspan="2">PRODUTO</td></tr>
+            <tr><td>(-) Custo Mercadoria (CMV)</td><td class="detail-val-red">R$ {d['custo_produto']:.2f}</td></tr>
+            
+            <tr style="border-top: 2px solid #333;">
+                <td style="font-size:14px; font-weight:bold;">(=) LUCRO LÍQUIDO</td>
+                <td class="detail-val-green" style="font-size:15px;">R$ {dados['lucro']:.2f}</td>
+            </tr>
         </table>
         """
         st.markdown(html_table, unsafe_allow_html=True)
