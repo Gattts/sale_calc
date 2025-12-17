@@ -3,15 +3,21 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import date
 
+# ==============================================================================
+# 1. CONFIGURAÇÃO
+# ==============================================================================
 st.set_page_config(page_title="Financeiro", page_icon="💰", layout="wide")
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 3rem !important; }
+    .block-container { padding-top: 2rem !important; }
+    div[data-testid="stMetricValue"] { font-size: 1.4rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO ---
+# ==============================================================================
+# 2. CONEXÃO AWS
+# ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
 DB_PASS = "Sigmacomjp25"
@@ -25,7 +31,7 @@ def carregar_financeiro():
     query = """
         SELECT id, fornecedor, nro_documento, vencimento, valor, situacao 
         FROM contas_pagar 
-        ORDER BY vencimento DESC
+        ORDER BY vencimento ASC
     """
     try:
         engine = get_engine()
@@ -36,11 +42,14 @@ def carregar_financeiro():
         return pd.DataFrame()
 
 def style_status(v):
-    if str(v).lower() == 'pago': return 'background-color: #d4edda; color: green; font-weight: bold;'
-    if str(v).lower() == 'atrasado': return 'background-color: #f8d7da; color: red; font-weight: bold;'
+    val = str(v).lower().strip()
+    if 'pago' in val: return 'background-color: #d4edda; color: green; font-weight: bold;'
+    if 'atrasado' in val: return 'background-color: #f8d7da; color: red; font-weight: bold;'
     return 'background-color: #fff3cd; color: #856404;'
 
-# --- LÓGICA ---
+# ==============================================================================
+# 3. INTERFACE
+# ==============================================================================
 st.title("📊 Gestão Financeira")
 
 if st.button("🔄 Atualizar"):
@@ -50,32 +59,38 @@ if st.button("🔄 Atualizar"):
 df = carregar_financeiro()
 
 if not df.empty:
-    # Tratamento de Datas e Status
+    # Tratamento de Datas
     df['vencimento'] = pd.to_datetime(df['vencimento']).dt.date
     hoje = date.today()
 
+    # Define status dinâmico (Atrasado se não pago e vencido)
     def definir_status(row):
-        if str(row['situacao']).strip().lower() == 'pago': return 'Pago'
+        situacao = str(row['situacao']).strip().lower()
+        if situacao == 'pago': return 'Pago'
         if row['vencimento'] < hoje: return 'Atrasado'
         return 'Aberto'
 
     df['Status Real'] = df.apply(definir_status, axis=1)
 
-    # --- ÁREA DE FILTROS ---
+    # --- FILTROS ---
     with st.container(border=True):
         st.caption("Filtros Avançados")
-        c1, c2, c3 = st.columns(3)
+        # Agora são 4 colunas para caber a Data
+        c1, c2, c3, c4 = st.columns(4)
         
-        # Filtro 1: Fornecedor
+        # 1. Fornecedor
         lista_fornecedores = sorted(df['fornecedor'].unique().astype(str))
         filtro_forn = c1.multiselect("🏢 Fornecedor", options=lista_fornecedores)
         
-        # Filtro 2: Situação
+        # 2. Situação
         lista_status = sorted(df['Status Real'].unique().astype(str))
         filtro_sit = c2.multiselect("📌 Situação", options=lista_status)
         
-        # Filtro 3: Documento
+        # 3. Documento
         busca_doc = c3.text_input("📄 NF/Parcela", placeholder="Digite o número...")
+
+        # 4. Data (NOVO)
+        data_range = c4.date_input("📅 Vencimento", value=[], help="Selecione Data Inicial e Final")
 
     # APLICAÇÃO DOS FILTROS
     df_filtrado = df.copy()
@@ -89,9 +104,15 @@ if not df.empty:
     if busca_doc:
         df_filtrado = df_filtrado[df_filtrado['nro_documento'].astype(str).str.contains(busca_doc, case=False)]
 
-    # --- MÉTRICAS (Baseadas no Filtrado) ---
+    # Filtro de Data (Lógica)
+    if len(data_range) == 2:
+        inicio, fim = data_range
+        df_filtrado = df_filtrado[(df_filtrado['vencimento'] >= inicio) & (df_filtrado['vencimento'] <= fim)]
+
+    # --- MÉTRICAS ---
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
+    
     total = df_filtrado['valor'].sum()
     atrasado = df_filtrado[df_filtrado['Status Real'] == 'Atrasado']['valor'].sum()
     aberto = df_filtrado[df_filtrado['Status Real'] == 'Aberto']['valor'].sum()
@@ -103,7 +124,6 @@ if not df.empty:
     m4.metric("✅ Pago", f"R$ {pago:,.2f}")
 
     # --- TABELA ---
-    # Renomeando colunas para exibição
     df_show = df_filtrado[['fornecedor', 'nro_documento', 'vencimento', 'valor', 'Status Real']].copy()
     df_show.columns = ['Fornecedor', 'NF/Parcela', 'Vencimento', 'Valor', 'Situação']
     
@@ -115,4 +135,4 @@ if not df.empty:
         hide_index=True
     )
 else:
-    st.info("Nenhum registro encontrado.")
+    st.info("Nenhum registro financeiro encontrado.")
