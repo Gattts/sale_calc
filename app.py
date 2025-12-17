@@ -12,21 +12,17 @@ st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="�
 
 st.markdown("""
 <style>
-    /* Ajuste Fino do Espaçamento Superior e Inferior */
     .block-container {
         padding-top: 2.5rem !important;
         padding-bottom: 1rem !important;
-        max-width: 98% !important; /* Aproveita mais a largura da tela */
+        max-width: 98% !important;
     }
-    
-    /* Botões mais compactos */
     .stButton>button { 
         border-radius: 6px; 
         font-weight: bold; 
         height: 2.5em; 
         padding: 0.2em 1em;
     }
-    
     /* Cards de Resultado */
     .result-card {
         background-color: #f8f9fa;
@@ -45,8 +41,6 @@ st.markdown("""
         font-size: 13px; font-weight: 600; color: #333; 
         display: flex; justify-content: space-between;
     }
-    
-    /* Labels dos inputs menores para economizar espaço */
     .stTextInput label, .stNumberInput label {
         font-size: 13px !important;
         margin-bottom: 0px !important;
@@ -347,7 +341,7 @@ with tab2:
             st.session_state.prod_id_selecionado = None
             st.session_state['ultimo_prod_carregado'] = "NOVO"
 
-    # --- LAYOUT OTIMIZADO: 2 COLUNAS MACRO (80% / 20%) ---
+    # --- LAYOUT OTIMIZADO (80% / 20%) ---
     col_form, col_resumo = st.columns([0.80, 0.20])
     
     with col_form:
@@ -359,12 +353,12 @@ with tab2:
             forn_val = c3.text_input("Fornecedor", key="in_forn")
 
             st.caption("2. Entrada")
-            c4, c5, c6 = st.columns([2, 1, 1])
+            # AQUI ESTÁ O AJUSTE DE ALINHAMENTO VERTICAL (bottom)
+            c4, c5, c6 = st.columns([2, 1, 1], vertical_alignment="bottom")
             nf_val = c4.text_input("Nº NF", key="in_nf")
             qtd_val = c5.number_input("Qtd", min_value=1, key="in_qtd")
             l_real = c6.toggle("Lucro Real", True)
 
-            # AQUI ESTÁ O TRUQUE: 3 COLUNAS EM VEZ DE 4 PARA NÃO EMPILHAR
             st.caption("3. Custos Unitários")
             k1, k2, k3 = st.columns(3)
             pc = k1.text_input("Preço Compra (R$)", value=st.session_state.get('pc_cad', '0.0'), key="pc_cad")
@@ -377,9 +371,9 @@ with tab2:
             outros = k6.text_input("Outros (R$)", value=st.session_state.get('out_cad', '0.0'), key="out_cad")
             
             st.write("")
-            b1, b2, b3 = st.columns([1, 2, 2])
+            # Botões alinhados
+            b1, b2, b3 = st.columns([1, 2, 2], vertical_alignment="bottom")
             
-            # Conversão manual segura para float
             def safe_float(v):
                 try: return float(v.replace(',', '.'))
                 except: return 0.0
