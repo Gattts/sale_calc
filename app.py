@@ -23,7 +23,6 @@ st.markdown("""
         height: 2.5em; 
         padding: 0.2em 1em;
     }
-    /* Cards de Resultado */
     .result-card {
         background-color: #f8f9fa;
         border: 1px solid #e0e0e0;
@@ -341,7 +340,6 @@ with tab2:
             st.session_state.prod_id_selecionado = None
             st.session_state['ultimo_prod_carregado'] = "NOVO"
 
-    # --- LAYOUT OTIMIZADO (80% / 20%) ---
     col_form, col_resumo = st.columns([0.80, 0.20])
     
     with col_form:
@@ -353,7 +351,6 @@ with tab2:
             forn_val = c3.text_input("Fornecedor", key="in_forn")
 
             st.caption("2. Entrada")
-            # AQUI ESTÁ O AJUSTE DE ALINHAMENTO VERTICAL (bottom)
             c4, c5, c6 = st.columns([2, 1, 1], vertical_alignment="bottom")
             nf_val = c4.text_input("Nº NF", key="in_nf")
             qtd_val = c5.number_input("Qtd", min_value=1, key="in_qtd")
@@ -371,7 +368,6 @@ with tab2:
             outros = k6.text_input("Outros (R$)", value=st.session_state.get('out_cad', '0.0'), key="out_cad")
             
             st.write("")
-            # Botões alinhados
             b1, b2, b3 = st.columns([1, 2, 2], vertical_alignment="bottom")
             
             def safe_float(v):
@@ -382,7 +378,7 @@ with tab2:
                 res = calcular_custo_aquisicao(safe_float(pc), safe_float(frete), safe_float(ipi), safe_float(outros), 0.0, safe_float(icms_frete), safe_float(icms_prod), 1.65, 7.60, l_real)
                 st.session_state.custo_final = res['custo_final']
                 st.session_state.detalhes_custo = res
-                st.toast("Custo OK!", icon="✅")
+                st.rerun() # <--- CORREÇÃO AQUI: Força o app a recarregar para mostrar o valor na hora
 
             if b2.button("💾 Salvar Novo", type="primary", use_container_width=True):
                 if sku_val and nome_val:
