@@ -12,12 +12,20 @@ st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="�
 
 st.markdown("""
 <style>
-    /* Topo Ajustado - Compacto */
+    /* Ajuste Fino do Espaçamento Superior e Inferior */
     .block-container {
-        padding-top: 1.5rem !important;
+        padding-top: 2.5rem !important;
         padding-bottom: 1rem !important;
+        max-width: 98% !important; /* Aproveita mais a largura da tela */
     }
-    .stButton>button { border-radius: 6px; font-weight: bold; height: 2.8em; }
+    
+    /* Botões mais compactos */
+    .stButton>button { 
+        border-radius: 6px; 
+        font-weight: bold; 
+        height: 2.5em; 
+        padding: 0.2em 1em;
+    }
     
     /* Cards de Resultado */
     .result-card {
@@ -29,18 +37,20 @@ st.markdown("""
         margin-bottom: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .card-title { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
-    .card-price { font-size: 28px; font-weight: 800; color: #1E88E5; margin: 0; line-height: 1.1; }
-    .card-profit { font-size: 18px; font-weight: bold; color: #2E7D32; margin-top: 5px; }
+    .card-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+    .card-price { font-size: 24px; font-weight: 800; color: #1E88E5; margin: 0; line-height: 1.1; }
+    .card-profit { font-size: 16px; font-weight: bold; color: #2E7D32; margin-top: 5px; }
     .card-footer { 
-        margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; 
-        font-size: 14px; font-weight: 600; color: #333; 
+        margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; 
+        font-size: 13px; font-weight: 600; color: #333; 
         display: flex; justify-content: space-between;
     }
     
-    /* Input Compacto */
-    div[data-testid="stNumberInput"] label { font-size: 13px; }
-    div[data-testid="stTextInput"] label { font-size: 13px; }
+    /* Labels dos inputs menores para economizar espaço */
+    .stTextInput label, .stNumberInput label {
+        font-size: 13px !important;
+        margin-bottom: 0px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -337,8 +347,8 @@ with tab2:
             st.session_state.prod_id_selecionado = None
             st.session_state['ultimo_prod_carregado'] = "NOVO"
 
-    # --- LAYOUT HORIZONTAL E COMPACTO ---
-    col_form, col_resumo = st.columns([3, 1])
+    # --- LAYOUT OTIMIZADO: 2 COLUNAS MACRO (80% / 20%) ---
+    col_form, col_resumo = st.columns([0.80, 0.20])
     
     with col_form:
         with st.container(border=True):
@@ -354,33 +364,38 @@ with tab2:
             qtd_val = c5.number_input("Qtd", min_value=1, key="in_qtd")
             l_real = c6.toggle("Lucro Real", True)
 
-            st.caption("3. Custos (Unitários)")
-            k1, k2, k3, k4 = st.columns(4)
-            pc = input_float("Preço (R$)", 0.0, "pc_cad")
-            frete = input_float("Frete (R$)", 0.0, "fr_cad")
-            ipi = input_float("IPI (%)", 0.0, "ipi_cad")
-            outros = input_float("Outros (R$)", 0.0, "out_cad")
+            # AQUI ESTÁ O TRUQUE: 3 COLUNAS EM VEZ DE 4 PARA NÃO EMPILHAR
+            st.caption("3. Custos Unitários")
+            k1, k2, k3 = st.columns(3)
+            pc = k1.text_input("Preço Compra (R$)", value=st.session_state.get('pc_cad', '0.0'), key="pc_cad")
+            frete = k2.text_input("Frete Compra (R$)", value=st.session_state.get('fr_cad', '0.0'), key="fr_cad")
+            ipi = k3.text_input("IPI (%)", value=st.session_state.get('ipi_cad', '0.0'), key="ipi_cad")
             
-            k5, k6, k7, k8 = st.columns(4)
-            icms_prod = input_float("ICMS Prod(%)", 12.0, "icmsp_cad")
-            icms_frete = input_float("ICMS Frete(%)", 0.0, "icmsf_cad")
-            st_val = input_float("ST (R$)", 0.0, "st_cad")
+            k4, k5, k6 = st.columns(3)
+            icms_prod = k4.text_input("ICMS Prod(%)", value=st.session_state.get('icmsp_cad', '12.0'), key="icmsp_cad")
+            icms_frete = k5.text_input("ICMS Frete(%)", value=st.session_state.get('icmsf_cad', '0.0'), key="icmsf_cad")
+            outros = k6.text_input("Outros (R$)", value=st.session_state.get('out_cad', '0.0'), key="out_cad")
             
             st.write("")
             b1, b2, b3 = st.columns([1, 2, 2])
             
+            # Conversão manual segura para float
+            def safe_float(v):
+                try: return float(v.replace(',', '.'))
+                except: return 0.0
+
             if b1.button("🔄 Calcular", use_container_width=True):
-                res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
+                res = calcular_custo_aquisicao(safe_float(pc), safe_float(frete), safe_float(ipi), safe_float(outros), 0.0, safe_float(icms_frete), safe_float(icms_prod), 1.65, 7.60, l_real)
                 st.session_state.custo_final = res['custo_final']
                 st.session_state.detalhes_custo = res
                 st.toast("Custo OK!", icon="✅")
 
             if b2.button("💾 Salvar Novo", type="primary", use_container_width=True):
                 if sku_val and nome_val:
-                    res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
+                    res = calcular_custo_aquisicao(safe_float(pc), safe_float(frete), safe_float(ipi), safe_float(outros), 0.0, safe_float(icms_frete), safe_float(icms_prod), 1.65, 7.60, l_real)
                     sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, data_compra) 
                              VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :dt)"""
-                    params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "dt": date.today()}
+                    params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": safe_float(pc), "ipi": safe_float(ipi), "icms": safe_float(icms_prod), "pf": res['custo_final'], "dt": date.today()}
                     if run_command(sql, params):
                         st.toast("Salvo!", icon="☁️")
                         time.sleep(1)
@@ -388,10 +403,10 @@ with tab2:
 
             if st.session_state.prod_id_selecionado:
                 if b3.button("✏️ Atualizar", use_container_width=True):
-                    res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
+                    res = calcular_custo_aquisicao(safe_float(pc), safe_float(frete), safe_float(ipi), safe_float(outros), 0.0, safe_float(icms_frete), safe_float(icms_prod), 1.65, 7.60, l_real)
                     sql = """UPDATE produtos SET sku=:sku, nome=:nome, fornecedor=:forn, nro_nf=:nf, quantidade=:qtd, 
                              preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf WHERE id=:id"""
-                    params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "id": st.session_state.prod_id_selecionado}
+                    params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": safe_float(pc), "ipi": safe_float(ipi), "icms": safe_float(icms_prod), "pf": res['custo_final'], "id": st.session_state.prod_id_selecionado}
                     if run_command(sql, params):
                         st.toast("Atualizado!", icon="🔄")
                         time.sleep(1)
@@ -402,7 +417,7 @@ with tab2:
             d = st.session_state.detalhes_custo
             with st.container(border=True):
                 st.caption("Resumo")
-                st.markdown(f'<div class="card-price" style="font-size: 26px;">R$ {d.get("custo_final", 0):.2f}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="card-price" style="font-size: 20px;">R$ {d.get("custo_final", 0):.2f}</div>', unsafe_allow_html=True)
                 st.caption("Custo Final Unitário")
                 st.divider()
                 st.write(f"**ICMS Rec:** R$ {d.get('credito_icms', 0):.2f}")
