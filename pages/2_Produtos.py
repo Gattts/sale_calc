@@ -73,7 +73,14 @@ df = carregar_historico()
 if not df.empty:
     with st.expander("🔍 Filtros Avançados", expanded=True):
         f1, f2, f3, f4 = st.columns(4)
-        busca = f1.text_input("Produto/SKU", placeholder="Nome ou SKU")
+        
+        # --- FILTRO DE PRODUTO COM LISTA SUSPENSA ---
+        # Cria uma lista de opções formatadas: "SKU - Nome"
+        # Remove duplicatas baseadas no SKU para a lista de seleção
+        produtos_unicos = df[['sku', 'nome']].drop_duplicates(subset=['sku']).sort_values('nome')
+        opcoes_produtos = ["Todos"] + [f"{row['sku']} | {row['nome']}" for _, row in produtos_unicos.iterrows()]
+        
+        produto_selecionado = f1.selectbox("Produto/SKU", options=opcoes_produtos)
         
         # Garante lista única de fornecedores sem valores nulos
         lista_fornecedores = sorted(list(set(df['fornecedor'].dropna().unique())))
@@ -85,9 +92,10 @@ if not df.empty:
     # APLICAÇÃO DOS FILTROS
     df_filtrado = df.copy()
     
-    if busca:
-        mask = df_filtrado['nome'].str.contains(busca, case=False, na=False) | df_filtrado['sku'].str.contains(busca, case=False, na=False)
-        df_filtrado = df_filtrado[mask]
+    # Filtro pelo Selectbox (Extrai o SKU da string selecionada)
+    if produto_selecionado != "Todos":
+        sku_filtro = produto_selecionado.split(" | ")[0] # Pega só o SKU antes do separador
+        df_filtrado = df_filtrado[df_filtrado['sku'] == sku_filtro]
         
     if forn_sel:
         df_filtrado = df_filtrado[df_filtrado['fornecedor'].isin(forn_sel)]
