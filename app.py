@@ -5,14 +5,22 @@ from datetime import date
 import time
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILO
+# 1. CONFIGURAÇÃO E ESTILO (Espaçamento Corrigido)
 # ==============================================================================
 st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="🚀")
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 2rem !important; max-width: 98%; }
+    /* 1. Ajuste de Espaçamento no Topo */
+    .block-container { 
+        padding-top: 1rem !important; 
+        padding-bottom: 1rem !important; 
+        max-width: 98%; 
+    }
+    
     .stButton>button { border-radius: 6px; font-weight: bold; height: 2.8em; }
+    
+    /* Cards de Resultado */
     .result-card {
         background-color: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 10px;
         padding: 15px; text-align: center; margin-bottom: 10px;
@@ -29,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CONEXÃO
+# 2. CONEXÃO E FUNÇÕES DO BANCO
 # ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
@@ -72,13 +80,9 @@ def run_command(query, params):
 # 3. LÓGICA E CONVERSÃO
 # ==============================================================================
 def str_to_float(valor_str):
-    """Converte qualquer string (ex: '1.200,50' ou '10.5') para float."""
     if not valor_str: return 0.0
     if isinstance(valor_str, (float, int)): return float(valor_str)
     try:
-        # Remove ponto de milhar se houver e troca vírgula decimal por ponto
-        # Ex: "1.000,50" -> "1000.50"
-        # Simples: apenas troca , por .
         return float(str(valor_str).replace(',', '.').strip())
     except:
         return 0.0
@@ -200,11 +204,9 @@ def card_resultado(titulo, dados):
 # ==============================================================================
 # 4. GESTÃO DE ESTADO
 # ==============================================================================
-# Garante que variáveis numéricas existam
 if 'custo_final' not in st.session_state: st.session_state.custo_final = 0.0
 if 'prod_selecionado' not in st.session_state: st.session_state.prod_selecionado = None
 
-# Inicializa inputs de TEXTO da sidebar e cadastro com valor VAZIO por padrão
 keys_texto = ['in_sku', 'in_nome', 'in_forn', 'in_nf', 'in_qtd', 
               'pc_cad', 'fr_cad', 'ipi_cad', 'peso_cad', 'icmsp_cad', 'icmsf_cad', 'out_cad', 'st_cad',
               'sb_icms', 'sb_difal', 'sb_peso', 'sb_armaz',
@@ -214,7 +216,59 @@ for k in keys_texto:
     if k not in st.session_state: st.session_state[k] = ""
 
 # ==============================================================================
-# 5. ÁREA PRINCIPAL
+# 5. MODAL DE ATUALIZAÇÃO (POP-UP)
+# ==============================================================================
+@st.dialog("✏️ Atualizar Custos do Produto")
+def dialog_atualizar_produto(prod_id, dados_iniciais):
+    st.caption(f"Editando: {dados_iniciais['nome']}")
+    
+    # Inputs dentro do Modal (usamos chaves 'upd_' para não conflitar)
+    c1, c2, c3 = st.columns(3)
+    upd_pc = c1.text_input("Preço Compra (R$)", value=f"{dados_iniciais['preco_partida']:.2f}", key="upd_pc")
+    upd_fr = c2.text_input("Frete Compra (R$)", value="0.00", key="upd_fr") # Assumindo 0 ou criar campo no banco
+    upd_ipi = c3.text_input("IPI (%)", value=f"{dados_iniciais['ipi_percent']:.2f}", key="upd_ipi")
+    
+    c4, c5, c6 = st.columns(3)
+    upd_peso = c4.text_input("Peso (Kg)", value=f"{dados_iniciais['peso']:.3f}" if dados_iniciais['peso'] else "0.000", key="upd_peso")
+    upd_icmsp = c5.text_input("ICMS Prod (%)", value=f"{dados_iniciais['icms_percent']:.2f}", key="upd_icmsp")
+    upd_icmsf = c6.text_input("ICMS Frete (%)", value="0.00", key="upd_icmsf")
+    
+    c7, c8, c9 = st.columns(3)
+    upd_out = c7.text_input("Outros (R$)", value="0.00", key="upd_out")
+    upd_st = c8.text_input("ST (R$)", value="0.00", key="upd_st")
+    upd_lreal = st.toggle("Lucro Real", value=True, key="upd_lreal")
+    
+    st.divider()
+    
+    # Botão de Cálculo Prévio no Modal
+    if st.button("🔄 Simular Novo Custo", use_container_width=True):
+        res = calcular_custo_aquisicao(upd_pc, upd_fr, upd_ipi, upd_out, upd_st, upd_icmsf, upd_icmsp, upd_lreal)
+        st.info(f"Novo Custo Final Calculado: **R$ {res['custo_final']:.2f}**")
+        st.session_state['temp_custo_calc'] = res['custo_final'] # Guarda temporariamente
+
+    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
+        # Recalcula para garantir o valor final
+        res_final = calcular_custo_aquisicao(upd_pc, upd_fr, upd_ipi, upd_out, upd_st, upd_icmsf, upd_icmsp, upd_lreal)
+        
+        novo_peso = str_to_float(upd_peso)
+        novo_pp = str_to_float(upd_pc)
+        novo_ipi = str_to_float(upd_ipi)
+        novo_icmsp = str_to_float(upd_icmsp)
+        
+        sql = """UPDATE produtos SET preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, 
+                 preco_final=:pf, peso=:peso WHERE id=:id"""
+        params = {
+            "pp": novo_pp, "ipi": novo_ipi, "icms": novo_icmsp,
+            "pf": res_final['custo_final'], "peso": novo_peso, "id": prod_id
+        }
+        
+        if run_command(sql, params):
+            st.toast("Produto Atualizado com Sucesso!", icon="✅")
+            time.sleep(1)
+            st.rerun()
+
+# ==============================================================================
+# 6. ÁREA PRINCIPAL
 # ==============================================================================
 tab1, tab2 = st.tabs(["🧮 Calculadora", "📝 Cadastro (DB)"])
 
@@ -226,8 +280,6 @@ with tab1:
     tipo = st.radio("Meta:", ["Margem (%)", "Preço (R$)"], horizontal=True, label_visibility="collapsed")
     modo = "margem" if "Margem" in tipo else "preco"
     
-    # Captura valores da sidebar (Inputs de Texto)
-    # Se estiver vazio, usa um default seguro para cálculo
     icms_val = st.session_state.sb_icms if st.session_state.sb_icms else "18.0"
     difal_val = st.session_state.sb_difal if st.session_state.sb_difal else "0.0"
     peso_val = st.session_state.sb_peso if st.session_state.sb_peso else "0.3"
@@ -240,9 +292,8 @@ with tab1:
         c1, c2 = st.columns(2)
         with c1:
             st.caption("🔹 Clássico")
-            # Usa key diretamente. Se value não for definido, ele persiste o session_state
             com = st.text_input("Comissão %", key="com_cla") 
-            if not com: com = "11.5" # Default lógico se usuário apagar tudo
+            if not com: com = "11.5"
             
             if modo == "preco":
                 pr = st.text_input("Preço R$", key="pr_cla")
@@ -287,14 +338,14 @@ with tab1:
 with tab2:
     st.markdown("### ☁️ Cadastro")
     
-    # 1. Carrega Produtos e Remove Duplicatas
-    df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso FROM produtos ORDER BY id DESC")
+    # 1. Carrega Produtos
+    df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso, preco_final FROM produtos ORDER BY id DESC")
     
     lista_prods = ["✨ Novo Produto"]
     dados_map = {}
     
     if not df.empty:
-        # Remove duplicatas de SKU mantendo o mais recente (primeiro da lista pois order by id desc)
+        # Remove duplicatas de SKU mantendo o mais recente
         df_unicos = df.drop_duplicates(subset=['sku'])
         df_unicos = df_unicos.sort_values(by='nome')
         
@@ -305,136 +356,87 @@ with tab2:
 
     sel = st.selectbox("Buscar:", lista_prods)
 
-    # 2. Lógica de Carregamento
-    if sel != "✨ Novo Produto":
+    # 2. Lógica de Visualização (NOVO OU EXISTENTE)
+    if sel == "✨ Novo Produto":
+        # MODO CADASTRO NOVO (FORMULÁRIO NA TELA)
+        st.session_state.prod_id = None
+        c_form, c_res = st.columns([0.8, 0.2])
+        with c_form:
+            with st.container(border=True):
+                st.caption("Novo Cadastro")
+                c1, c2, c3 = st.columns([1, 2, 2])
+                st.text_input("SKU", key="in_sku")
+                st.text_input("Nome", key="in_nome")
+                st.text_input("Fornecedor", key="in_forn")
+
+                c4, c5, c6 = st.columns([2, 1, 1], vertical_alignment="bottom")
+                st.text_input("NF", key="in_nf")
+                st.text_input("Qtd", key="in_qtd")
+                l_real = st.toggle("Lucro Real", True)
+
+                st.caption("Valores (Use vírgula ou ponto)")
+                k1, k2, k3 = st.columns(3)
+                st.text_input("Preço Compra (R$)", key="pc_cad")
+                st.text_input("Frete Compra (R$)", key="fr_cad")
+                st.text_input("IPI (%)", key="ipi_cad")
+                
+                k4, k5, k6 = st.columns(3)
+                st.text_input("Peso (Kg)", key="peso_cad")
+                st.text_input("ICMS Prod (%)", key="icmsp_cad")
+                st.text_input("ICMS Frete (%)", key="icmsf_cad")
+                
+                k7, k8, k9 = st.columns(3)
+                st.text_input("Outros (R$)", key="out_cad")
+                st.text_input("ST (R$)", key="st_cad")
+                
+                st.write("")
+                if st.button("💾 Salvar Novo", type="primary"):
+                    if st.session_state.in_sku:
+                        pp = str_to_float(st.session_state.pc_cad)
+                        peso = str_to_float(st.session_state.peso_cad)
+                        res = calcular_custo_aquisicao(st.session_state.pc_cad, st.session_state.fr_cad, st.session_state.ipi_cad, st.session_state.out_cad, st.session_state.st_cad, st.session_state.icmsf_cad, st.session_state.icmsp_cad, l_real)
+                        
+                        sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, peso, data_compra) 
+                                 VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :peso, :dt)"""
+                        params = {
+                            "sku": st.session_state.in_sku, "nome": st.session_state.in_nome, "forn": st.session_state.in_forn,
+                            "nf": st.session_state.in_nf, "qtd": str_to_float(st.session_state.in_qtd),
+                            "pp": pp, "ipi": str_to_float(st.session_state.ipi_cad), "icms": str_to_float(st.session_state.icmsp_cad),
+                            "pf": res['custo_final'], "peso": peso, "dt": date.today()
+                        }
+                        if run_command(sql, params):
+                            st.toast("Salvo!", icon="💾")
+                            time.sleep(1)
+                            st.rerun()
+    
+    else:
+        # MODO PRODUTO EXISTENTE (VISUALIZAÇÃO + BOTÃO POP-UP)
+        d = dados_map[sel]
+        
+        # Atualiza Sidebar com dados do produto selecionado
         if st.session_state.get('last_loaded') != sel:
-            d = dados_map[sel]
-            st.session_state.prod_id = d['id']
-            # Strings diretas
-            st.session_state.in_sku = str(d['sku'])
-            st.session_state.in_nome = str(d['nome'])
-            st.session_state.in_forn = str(d['fornecedor'] or "")
-            st.session_state.in_nf = str(d['nro_nf'] or "")
-            st.session_state.in_qtd = str(d['quantidade'])
-            
-            # Formatação de valores (se nulo, poe zero)
-            st.session_state.pc_cad = f"{d['preco_partida']:.2f}"
-            st.session_state.ipi_cad = f"{d['ipi_percent']:.2f}"
-            st.session_state.icmsp_cad = f"{d['icms_percent']:.2f}"
-            st.session_state.peso_cad = f"{d['peso']:.3f}" if d['peso'] else "0.000"
-            
-            # ESPELHAMENTO SIDEBAR (Mantém o que veio do banco)
+            st.session_state.custo_final = float(d['preco_final'])
             st.session_state.sb_peso = f"{d['peso']:.3f}" if (d['peso'] and float(d['peso']) > 0) else "0.300"
             st.session_state.sb_icms = f"{d['icms_percent']:.2f}" if (d['icms_percent'] and float(d['icms_percent']) > 0) else "18.00"
-            
             st.session_state.last_loaded = sel
-            st.toast("Dados Carregados!", icon="✅")
-            st.rerun()
-    else:
-        if st.session_state.get('last_loaded') != "NOVO":
-            st.session_state.prod_id = None
-            st.session_state.last_loaded = "NOVO"
-            # Limpa campos chave
-            for k in ['pc_cad', 'ipi_cad', 'peso_cad', 'in_sku', 'in_nome']: st.session_state[k] = ""
             st.rerun()
 
-    # 3. Formulário
-    c_form, c_res = st.columns([0.8, 0.2])
-    with c_form:
+        # Mostra apenas o Card Informativo (Requisição 2)
         with st.container(border=True):
-            c1, c2, c3 = st.columns([1, 2, 2])
-            st.text_input("SKU", key="in_sku")
-            st.text_input("Nome", key="in_nome")
-            st.text_input("Fornecedor", key="in_forn")
-
-            c4, c5, c6 = st.columns([2, 1, 1], vertical_alignment="bottom")
-            st.text_input("NF", key="in_nf")
-            st.text_input("Qtd", key="in_qtd")
-            l_real = st.toggle("Lucro Real", True)
-
-            st.caption("Valores (Use vírgula ou ponto)")
-            k1, k2, k3 = st.columns(3)
-            st.text_input("Preço Compra (R$)", key="pc_cad")
-            st.text_input("Frete Compra (R$)", key="fr_cad")
-            st.text_input("IPI (%)", key="ipi_cad")
+            cols = st.columns([1, 3, 2, 2])
+            cols[0].markdown(f"**SKU:**\n{d['sku']}")
+            cols[1].markdown(f"**Produto:**\n{d['nome']}")
+            cols[2].markdown(f"**Fornecedor:**\n{d['fornecedor']}")
+            cols[3].metric("Custo Final", f"R$ {d['preco_final']:,.2f}")
             
-            k4, k5, k6 = st.columns(3)
-            st.text_input("Peso (Kg)", key="peso_cad")
-            st.text_input("ICMS Prod (%)", key="icmsp_cad")
-            st.text_input("ICMS Frete (%)", key="icmsf_cad")
+            st.divider()
             
-            k7, k8, k9 = st.columns(3)
-            st.text_input("Outros (R$)", key="out_cad")
-            st.text_input("ST (R$)", key="st_cad")
-            
-            st.write("")
-            b1, b2, b3 = st.columns([1, 2, 2])
-            
-            if b1.button("🔄 Calcular Custo"):
-                res = calcular_custo_aquisicao(
-                    st.session_state.pc_cad, st.session_state.fr_cad, st.session_state.ipi_cad,
-                    st.session_state.out_cad, st.session_state.st_cad, st.session_state.icmsf_cad,
-                    st.session_state.icmsp_cad, l_real
-                )
-                st.session_state.custo_final = res['custo_final']
-                st.session_state.detalhes_custo = res
-                
-                # REFORÇA OS VALORES DA SIDEBAR PARA NÃO ZERAR
-                # Se o usuário não mexeu, mantém o que tá na session_state. 
-                # O rerun redesenha a sidebar com o que estiver em session_state.
-                st.rerun()
-
-            if b2.button("💾 Salvar Novo", type="primary"):
-                if st.session_state.in_sku:
-                    pp = str_to_float(st.session_state.pc_cad)
-                    peso = str_to_float(st.session_state.peso_cad)
-                    res = calcular_custo_aquisicao(st.session_state.pc_cad, st.session_state.fr_cad, st.session_state.ipi_cad, st.session_state.out_cad, st.session_state.st_cad, st.session_state.icmsf_cad, st.session_state.icmsp_cad, l_real)
-                    
-                    sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, peso, data_compra) 
-                             VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :peso, :dt)"""
-                    params = {
-                        "sku": st.session_state.in_sku, "nome": st.session_state.in_nome, "forn": st.session_state.in_forn,
-                        "nf": st.session_state.in_nf, "qtd": str_to_float(st.session_state.in_qtd),
-                        "pp": pp, "ipi": str_to_float(st.session_state.ipi_cad), "icms": str_to_float(st.session_state.icmsp_cad),
-                        "pf": res['custo_final'], "peso": peso, "dt": date.today()
-                    }
-                    if run_command(sql, params):
-                        st.toast("Salvo!", icon="💾")
-                        time.sleep(1)
-                        st.rerun()
-
-            if st.session_state.get('prod_id'):
-                if b3.button("✏️ Atualizar"):
-                    pp = str_to_float(st.session_state.pc_cad)
-                    peso = str_to_float(st.session_state.peso_cad)
-                    res = calcular_custo_aquisicao(st.session_state.pc_cad, st.session_state.fr_cad, st.session_state.ipi_cad, st.session_state.out_cad, st.session_state.st_cad, st.session_state.icmsf_cad, st.session_state.icmsp_cad, l_real)
-                    
-                    sql = """UPDATE produtos SET sku=:sku, nome=:nome, fornecedor=:forn, nro_nf=:nf, quantidade=:qtd, 
-                             preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf, peso=:peso WHERE id=:id"""
-                    params = {
-                        "sku": st.session_state.in_sku, "nome": st.session_state.in_nome, "forn": st.session_state.in_forn,
-                        "nf": st.session_state.in_nf, "qtd": str_to_float(st.session_state.in_qtd),
-                        "pp": pp, "ipi": str_to_float(st.session_state.ipi_cad), "icms": str_to_float(st.session_state.icmsp_cad),
-                        "pf": res['custo_final'], "peso": peso, "id": st.session_state.prod_id
-                    }
-                    if run_command(sql, params):
-                        st.toast("Atualizado!", icon="🔄")
-                        time.sleep(1)
-                        st.rerun()
-
-    with c_res:
-        if st.session_state.custo_final > 0:
-            d = st.session_state.detalhes_custo
-            with st.container(border=True):
-                st.caption("Custo Final")
-                st.markdown(f'<div class="card-price">R$ {d.get("custo_final", 0):.2f}</div>', unsafe_allow_html=True)
-                st.divider()
-                st.write(f"Créd. ICMS: {d.get('icms_rec', 0):.2f}")
-                st.write(f"Créd. PIS/COF: {d.get('pis_cof_rec', 0):.2f}")
-                st.success(f"Total Créd: {d.get('creditos', 0):.2f}")
+            # Botão para abrir o Modal de Atualização (Requisição 3)
+            if st.button("✏️ Atualizar Custos", type="primary"):
+                dialog_atualizar_produto(d['id'], d)
 
 # ==============================================================================
-# 6. SIDEBAR (POR ULTIMO)
+# 7. SIDEBAR (POR ULTIMO)
 # ==============================================================================
 with st.sidebar:
     st.title("🚀 Market Manager")
@@ -443,7 +445,6 @@ with st.sidebar:
     
     with st.expander("🛠️ Parâmetros & Tributos", expanded=True):
         c1, c2 = st.columns(2)
-        # Inputs que persistem o estado. Key é suficiente.
         st.text_input("ICMS (%)", key="sb_icms")
         st.text_input("DIFAL (%)", key="sb_difal")
         
