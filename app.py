@@ -20,6 +20,7 @@ st.markdown("""
         padding: 15px; text-align: center; margin-bottom: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
+    .card-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
     .card-price { font-size: 24px; font-weight: 800; color: #1E88E5; margin: 0; }
     .card-footer { 
         margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; 
@@ -42,7 +43,6 @@ DB_NAME = "marketmanager"
 @st.cache_resource
 def get_engine():
     engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
-    # Garante coluna PESO
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT peso FROM produtos LIMIT 1"))
@@ -83,7 +83,7 @@ def str_to_float(valor_str):
     except:
         return 0.0
 
-# TABELA DE FRETE E TAXAS (Lógica mantida)
+# TABELA DE FRETE E TAXAS
 def obter_taxa_fixa_ml(preco):
     if preco >= 79.00: return 0.00
     elif preco >= 50.00: return 6.75
@@ -113,14 +113,9 @@ def obter_frete_ml_tabela(preco, peso):
     return lista[-1][1]
 
 def calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, l_real):
-    # Converte strings para float aqui
-    v_pc = str_to_float(pc)
-    v_frete = str_to_float(frete)
-    v_ipi = str_to_float(ipi)
-    v_outros = str_to_float(outros)
-    v_st = str_to_float(st_val)
-    v_icms_frete = str_to_float(icms_frete)
-    v_icms_prod = str_to_float(icms_prod)
+    v_pc, v_frete, v_ipi = str_to_float(pc), str_to_float(frete), str_to_float(ipi)
+    v_outros, v_st = str_to_float(outros), str_to_float(st_val)
+    v_icms_frete, v_icms_prod = str_to_float(icms_frete), str_to_float(icms_prod)
 
     valor_ipi = v_pc * (v_ipi / 100)
     preco_medio = v_pc + v_frete + valor_ipi + v_outros + v_st
@@ -131,8 +126,7 @@ def calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_pr
         c_prod = v_pc * (v_icms_prod / 100)
         credito_icms = c_frete + c_prod
     
-    base_pis = preco_medio
-    credito_pis_cofins = base_pis * (0.0925) if l_real else 0.0 # 9.25% somado
+    credito_pis_cofins = preco_medio * (0.0925) if l_real else 0.0 
     
     total_creditos = credito_icms + credito_pis_cofins
     custo_final = preco_medio - total_creditos
@@ -140,7 +134,6 @@ def calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_pr
     return {'custo_final': custo_final, 'creditos': total_creditos, 'icms_rec': credito_icms, 'pis_cof_rec': credito_pis_cofins}
 
 def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_base, impostos, peso, is_full, armaz):
-    # Converte inputs para float
     v_margem = str_to_float(margem_alvo)
     v_preco_man = str_to_float(preco_manual)
     v_comissao = str_to_float(comissao)
@@ -149,8 +142,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_bas
     v_peso = str_to_float(peso)
     v_armaz = str_to_float(armaz)
 
-    # Taxas
-    imposto_total = v_icms + v_difal + 0.0925 # PIS/COFINS Venda
+    imposto_total = v_icms + v_difal + 0.0925
     perc_variaveis = imposto_total + (v_comissao/100) + (v_armaz/100 if not is_full else 0.0)
     
     taxa_fixa = 4.00 if "Shopee" in canal else 0.0
@@ -165,24 +157,19 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_bas
             taxa_fixa += obter_taxa_fixa_ml(preco)
             frete = obter_frete_ml_tabela(preco, v_peso)
     else:
-        # Modo Margem (Reverso)
         divisor = 1 - (perc_variaveis + (v_margem/100))
         if divisor <= 0: divisor = 0.01
         custos_fixos = custo_base + custo_full + taxa_fixa
         
         if "Mercado Livre" in canal:
-            # Tenta com frete estimado
             frete_est = obter_frete_ml_tabela(100.0, v_peso)
             p_teste = (custos_fixos + frete_est) / divisor
-            
-            # Recalcula com frete real do preço encontrado
             frete = obter_frete_ml_tabela(p_teste, v_peso)
             p_final = (custos_fixos + frete) / divisor
             
             if p_final >= 79.00:
                 preco = p_final
             else:
-                # É produto barato (<79), recalcula com Taxa Fixa ML
                 taxa_ml = obter_taxa_fixa_ml((custos_fixos + 6.00)/divisor)
                 preco = (custos_fixos + taxa_ml) / divisor
                 taxa_fixa += taxa_ml
@@ -190,13 +177,12 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_bas
         else:
             preco = custos_fixos / divisor
 
-    # Resultados Finais
     receita_liq = preco * (1 - perc_variaveis) - frete - taxa_fixa - custo_full
     lucro = receita_liq - custo_base
     margem_real = (lucro / preco * 100) if preco > 0 else 0.0
 
     return {
-        "preco": preco, "lucro": lucro, "margem": margem_real, "frete": frete, "repasse": receita_liq + custo_base,
+        "preco": preco, "lucro": lucro, "margem": margem_real, "frete": frete,
         "detalhes": {"v_icms": preco*v_icms, "v_comissao": preco*(v_comissao/100), "v_taxa": taxa_fixa}
     }
 
@@ -218,14 +204,14 @@ def card_resultado(titulo, dados):
 if 'custo_final' not in st.session_state: st.session_state.custo_final = 0.0
 if 'prod_selecionado' not in st.session_state: st.session_state.prod_selecionado = None
 
-# Inicializa variaveis dos inputs de TEXTO (para não dar erro de key)
+# Inicializa inputs de texto
 keys_texto = ['in_sku', 'in_nome', 'in_forn', 'in_nf', 'in_qtd', 
               'pc_cad', 'fr_cad', 'ipi_cad', 'peso_cad', 'icmsp_cad', 'icmsf_cad', 'out_cad', 'st_cad',
               'sb_icms', 'sb_difal', 'sb_peso', 'sb_armaz',
               'com_cla', 'marg_cla', 'pr_cla', 'com_pre', 'marg_pre', 'pr_pre', 'com_uni', 'marg_uni', 'pr_uni']
 
 for k in keys_texto:
-    if k not in st.session_state: st.session_state[k] = "" # Texto começa vazio ou string
+    if k not in st.session_state: st.session_state[k] = ""
 
 # ==============================================================================
 # 5. ÁREA PRINCIPAL
@@ -233,21 +219,21 @@ for k in keys_texto:
 tab1, tab2 = st.tabs(["🧮 Calculadora", "📝 Cadastro (DB)"])
 
 with tab1:
-    # Captura dados da sidebar (que será desenhada depois) via session_state
-    # Se estiver vazio, usa padrão
-    def get_val(key, default): return st.session_state.get(key, default) if st.session_state.get(key, "") != "" else default
-    
     canal = st.session_state.get('sb_canal', 'Mercado Livre')
-    
     st.markdown(f"### 🏷️ {canal}")
-    if st.session_state.custo_final <= 0: st.warning("⚠️ Custo Base zerado. Selecione um produto no Cadastro.")
+    if st.session_state.custo_final <= 0: st.warning("⚠️ Custo zerado. Selecione um produto.")
 
     tipo = st.radio("Meta:", ["Margem (%)", "Preço (R$)"], horizontal=True, label_visibility="collapsed")
     modo = "margem" if "Margem" in tipo else "preco"
     
-    # Dicionário de impostos lidos dos inputs de texto da sidebar
-    impostos = {'icms': get_val('sb_icms', '18.0'), 'difal': get_val('sb_difal', '0.0')}
-    peso_calc = get_val('sb_peso', '0.3')
+    # Captura valores da sidebar com segurança (se vazio, usa padrão)
+    impostos = {
+        'icms': st.session_state.sb_icms if st.session_state.sb_icms else "18.0", 
+        'difal': st.session_state.sb_difal if st.session_state.sb_difal else "0.0"
+    }
+    peso_calc = st.session_state.sb_peso if st.session_state.sb_peso else "0.3"
+    armaz_calc = st.session_state.sb_armaz if st.session_state.sb_armaz else "0.0"
+    is_full = st.session_state.get('sb_full', False)
     
     if "Mercado Livre" in canal:
         c1, c2 = st.columns(2)
@@ -256,10 +242,10 @@ with tab1:
             com = st.text_input("Comissão %", value=st.session_state.com_cla if st.session_state.com_cla else "11.5", key="com_cla")
             if modo == "preco":
                 pr = st.text_input("Preço R$", value=st.session_state.pr_cla if st.session_state.pr_cla else "100.00", key="pr_cla")
-                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, False, 0)
+                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
             else:
                 mg = st.text_input("Margem %", value=st.session_state.marg_cla if st.session_state.marg_cla else "15.0", key="marg_cla")
-                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, False, 0)
+                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
             card_resultado("Clássico", res)
             
         with c2:
@@ -267,10 +253,10 @@ with tab1:
             com = st.text_input("Comissão %", value=st.session_state.com_pre if st.session_state.com_pre else "16.5", key="com_pre")
             if modo == "preco":
                 pr = st.text_input("Preço R$", value=st.session_state.pr_pre if st.session_state.pr_pre else "110.00", key="pr_pre")
-                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, False, 0)
+                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
             else:
                 mg = st.text_input("Margem %", value=st.session_state.marg_pre if st.session_state.marg_pre else "15.0", key="marg_pre")
-                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, False, 0)
+                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
             card_resultado("Premium", res)
     else:
         st.caption(f"🛍️ {canal}")
@@ -278,66 +264,70 @@ with tab1:
         com = c1.text_input("Comissão %", value=st.session_state.com_uni if st.session_state.com_uni else "14.0", key="com_uni")
         if modo == "preco":
             pr = c2.text_input("Preço R$", value=st.session_state.pr_uni if st.session_state.pr_uni else "100.00", key="pr_uni")
-            res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, False, 0)
+            res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
         else:
             mg = c2.text_input("Margem %", value=st.session_state.marg_uni if st.session_state.marg_uni else "15.0", key="marg_uni")
-            res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, False, 0)
+            res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
         card_resultado("Resultado", res)
 
 with tab2:
     st.markdown("### ☁️ Cadastro")
     
-    # 1. Carrega Produtos
-    df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso FROM produtos ORDER BY nome ASC")
+    # 1. Carrega Produtos ÚNICOS (Remove duplicatas pelo SKU mantendo o último)
+    df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso FROM produtos ORDER BY id DESC")
+    
     lista_prods = ["✨ Novo Produto"]
     dados_map = {}
+    
     if not df.empty:
-        for _, row in df.iterrows():
+        # Remove duplicatas de SKU (mantém o primeiro que aparecer, que é o último ID pois ordenamos DESC)
+        df_unicos = df.drop_duplicates(subset=['sku'])
+        df_unicos = df_unicos.sort_values(by='nome') # Ordena por nome para o selectbox
+        
+        for _, row in df_unicos.iterrows():
             lbl = f"{row['sku']} - {row['nome']}"
             lista_prods.append(lbl)
             dados_map[lbl] = row
 
     sel = st.selectbox("Buscar:", lista_prods)
 
-    # 2. Lógica de Carregamento (Popula Session State dos Text Inputs)
+    # 2. Lógica de Carregamento
     if sel != "✨ Novo Produto":
         if st.session_state.get('last_loaded') != sel:
             d = dados_map[sel]
             st.session_state.prod_id = d['id']
-            # Preenche os inputs de texto formatados
             st.session_state.in_sku = str(d['sku'])
             st.session_state.in_nome = str(d['nome'])
             st.session_state.in_forn = str(d['fornecedor'] or "")
             st.session_state.in_nf = str(d['nro_nf'] or "")
             st.session_state.in_qtd = str(d['quantidade'])
             
-            # Formata Floats para String para o Input
+            # Formatação segura para inputs de texto
             st.session_state.pc_cad = f"{d['preco_partida']:.2f}"
             st.session_state.ipi_cad = f"{d['ipi_percent']:.2f}"
             st.session_state.icmsp_cad = f"{d['icms_percent']:.2f}"
             st.session_state.peso_cad = f"{d['peso']:.3f}" if d['peso'] else "0.000"
             
-            # Espelhamento Sidebar
-            st.session_state.sb_peso = f"{d['peso']:.3f}" if d['peso'] else "0.300"
-            st.session_state.sb_icms = f"{d['icms_percent']:.2f}"
+            # Espelhamento Sidebar (Se banco for 0, deixa padrão)
+            st.session_state.sb_peso = f"{d['peso']:.3f}" if (d['peso'] and float(d['peso']) > 0) else "0.300"
+            st.session_state.sb_icms = f"{d['icms_percent']:.2f}" if (d['icms_percent'] and float(d['icms_percent']) > 0) else "18.00"
             
             st.session_state.last_loaded = sel
             st.toast("Dados Carregados!", icon="✅")
-            st.rerun() # Atualiza a tela com os novos valores
+            st.rerun()
     else:
         if st.session_state.get('last_loaded') != "NOVO":
             st.session_state.prod_id = None
             st.session_state.last_loaded = "NOVO"
-            # Limpa campos chave
             for k in ['pc_cad', 'ipi_cad', 'peso_cad', 'in_sku', 'in_nome']: st.session_state[k] = ""
             st.rerun()
 
-    # 3. Formulário (Tudo Text Input)
+    # 3. Formulário
     c_form, c_res = st.columns([0.8, 0.2])
     with c_form:
         with st.container(border=True):
             c1, c2, c3 = st.columns([1, 2, 2])
-            st.text_input("SKU", key="in_sku") # O valor vem do session_state automaticamente pela key
+            st.text_input("SKU", key="in_sku")
             st.text_input("Nome", key="in_nome")
             st.text_input("Fornecedor", key="in_forn")
 
@@ -348,7 +338,6 @@ with tab2:
 
             st.caption("Valores (Use vírgula ou ponto)")
             k1, k2, k3 = st.columns(3)
-            # Text Inputs puros -> Resolvem o backspace
             st.text_input("Preço Compra (R$)", key="pc_cad")
             st.text_input("Frete Compra (R$)", key="fr_cad")
             st.text_input("IPI (%)", key="ipi_cad")
@@ -366,7 +355,6 @@ with tab2:
             b1, b2, b3 = st.columns([1, 2, 2])
             
             if b1.button("🔄 Calcular Custo"):
-                # Pega as strings, converte e calcula
                 res = calcular_custo_aquisicao(
                     st.session_state.pc_cad, st.session_state.fr_cad, st.session_state.ipi_cad,
                     st.session_state.out_cad, st.session_state.st_cad, st.session_state.icmsf_cad,
@@ -374,14 +362,12 @@ with tab2:
                 )
                 st.session_state.custo_final = res['custo_final']
                 st.session_state.detalhes_custo = res
-                st.rerun() # Atualiza card de resumo
+                st.rerun()
 
             if b2.button("💾 Salvar Novo", type="primary"):
                 if st.session_state.in_sku:
-                    # Converte tudo antes de salvar
                     pp = str_to_float(st.session_state.pc_cad)
                     peso = str_to_float(st.session_state.peso_cad)
-                    # Calcula custo final rapidinho pra garantir
                     res = calcular_custo_aquisicao(st.session_state.pc_cad, st.session_state.fr_cad, st.session_state.ipi_cad, st.session_state.out_cad, st.session_state.st_cad, st.session_state.icmsf_cad, st.session_state.icmsp_cad, l_real)
                     
                     sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, peso, data_compra) 
