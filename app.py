@@ -13,27 +13,23 @@ st.markdown("""
 <style>
     .block-container { padding-top: 2rem !important; max-width: 98%; }
     .stButton>button { border-radius: 6px; font-weight: bold; height: 2.8em; }
-    
-    /* Cards de Resultado */
     .result-card {
         background-color: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 10px;
         padding: 15px; text-align: center; margin-bottom: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .card-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
     .card-price { font-size: 24px; font-weight: 800; color: #1E88E5; margin: 0; }
     .card-footer { 
         margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; 
         font-size: 13px; font-weight: 600; display: flex; justify-content: space-between;
     }
-    /* Input Compacto */
     div[data-testid="stTextInput"] input { font-size: 15px; }
     div[data-testid="stTextInput"] label { font-size: 13px; margin-bottom: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CONEXÃO E FUNÇÕES DO BANCO
+# 2. CONEXÃO
 # ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
@@ -73,17 +69,20 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. LÓGICA DE NEGÓCIO E CONVERSÕES
+# 3. LÓGICA E CONVERSÃO
 # ==============================================================================
 def str_to_float(valor_str):
-    """Converte texto (com virgula ou ponto) para float seguro."""
+    """Converte qualquer string (ex: '1.200,50' ou '10.5') para float."""
     if not valor_str: return 0.0
+    if isinstance(valor_str, (float, int)): return float(valor_str)
     try:
+        # Remove ponto de milhar se houver e troca vírgula decimal por ponto
+        # Ex: "1.000,50" -> "1000.50"
+        # Simples: apenas troca , por .
         return float(str(valor_str).replace(',', '.').strip())
     except:
         return 0.0
 
-# TABELA DE FRETE E TAXAS
 def obter_taxa_fixa_ml(preco):
     if preco >= 79.00: return 0.00
     elif preco >= 50.00: return 6.75
@@ -201,10 +200,11 @@ def card_resultado(titulo, dados):
 # ==============================================================================
 # 4. GESTÃO DE ESTADO
 # ==============================================================================
+# Garante que variáveis numéricas existam
 if 'custo_final' not in st.session_state: st.session_state.custo_final = 0.0
 if 'prod_selecionado' not in st.session_state: st.session_state.prod_selecionado = None
 
-# Inicializa inputs de texto
+# Inicializa inputs de TEXTO da sidebar e cadastro com valor VAZIO por padrão
 keys_texto = ['in_sku', 'in_nome', 'in_forn', 'in_nf', 'in_qtd', 
               'pc_cad', 'fr_cad', 'ipi_cad', 'peso_cad', 'icmsp_cad', 'icmsf_cad', 'out_cad', 'st_cad',
               'sb_icms', 'sb_difal', 'sb_peso', 'sb_armaz',
@@ -226,63 +226,77 @@ with tab1:
     tipo = st.radio("Meta:", ["Margem (%)", "Preço (R$)"], horizontal=True, label_visibility="collapsed")
     modo = "margem" if "Margem" in tipo else "preco"
     
-    # Captura valores da sidebar com segurança (se vazio, usa padrão)
-    impostos = {
-        'icms': st.session_state.sb_icms if st.session_state.sb_icms else "18.0", 
-        'difal': st.session_state.sb_difal if st.session_state.sb_difal else "0.0"
-    }
-    peso_calc = st.session_state.sb_peso if st.session_state.sb_peso else "0.3"
-    armaz_calc = st.session_state.sb_armaz if st.session_state.sb_armaz else "0.0"
+    # Captura valores da sidebar (Inputs de Texto)
+    # Se estiver vazio, usa um default seguro para cálculo
+    icms_val = st.session_state.sb_icms if st.session_state.sb_icms else "18.0"
+    difal_val = st.session_state.sb_difal if st.session_state.sb_difal else "0.0"
+    peso_val = st.session_state.sb_peso if st.session_state.sb_peso else "0.3"
+    armaz_val = st.session_state.sb_armaz if st.session_state.sb_armaz else "0.0"
+    
+    impostos = {'icms': icms_val, 'difal': difal_val}
     is_full = st.session_state.get('sb_full', False)
     
     if "Mercado Livre" in canal:
         c1, c2 = st.columns(2)
         with c1:
             st.caption("🔹 Clássico")
-            com = st.text_input("Comissão %", value=st.session_state.com_cla if st.session_state.com_cla else "11.5", key="com_cla")
+            # Usa key diretamente. Se value não for definido, ele persiste o session_state
+            com = st.text_input("Comissão %", key="com_cla") 
+            if not com: com = "11.5" # Default lógico se usuário apagar tudo
+            
             if modo == "preco":
-                pr = st.text_input("Preço R$", value=st.session_state.pr_cla if st.session_state.pr_cla else "100.00", key="pr_cla")
-                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
+                pr = st.text_input("Preço R$", key="pr_cla")
+                if not pr: pr = "100.00"
+                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_val, is_full, armaz_val)
             else:
-                mg = st.text_input("Margem %", value=st.session_state.marg_cla if st.session_state.marg_cla else "15.0", key="marg_cla")
-                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
+                mg = st.text_input("Margem %", key="marg_cla")
+                if not mg: mg = "15.0"
+                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_val, is_full, armaz_val)
             card_resultado("Clássico", res)
             
         with c2:
             st.caption("🔸 Premium")
-            com = st.text_input("Comissão %", value=st.session_state.com_pre if st.session_state.com_pre else "16.5", key="com_pre")
+            com = st.text_input("Comissão %", key="com_pre")
+            if not com: com = "16.5"
+            
             if modo == "preco":
-                pr = st.text_input("Preço R$", value=st.session_state.pr_pre if st.session_state.pr_pre else "110.00", key="pr_pre")
-                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
+                pr = st.text_input("Preço R$", key="pr_pre")
+                if not pr: pr = "110.00"
+                res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_val, is_full, armaz_val)
             else:
-                mg = st.text_input("Margem %", value=st.session_state.marg_pre if st.session_state.marg_pre else "15.0", key="marg_pre")
-                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
+                mg = st.text_input("Margem %", key="marg_pre")
+                if not mg: mg = "15.0"
+                res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_val, is_full, armaz_val)
             card_resultado("Premium", res)
     else:
         st.caption(f"🛍️ {canal}")
         c1, c2 = st.columns(2)
-        com = c1.text_input("Comissão %", value=st.session_state.com_uni if st.session_state.com_uni else "14.0", key="com_uni")
+        com = c1.text_input("Comissão %", key="com_uni")
+        if not com: com = "14.0"
+        
         if modo == "preco":
-            pr = c2.text_input("Preço R$", value=st.session_state.pr_uni if st.session_state.pr_uni else "100.00", key="pr_uni")
-            res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
+            pr = c2.text_input("Preço R$", key="pr_uni")
+            if not pr: pr = "100.00"
+            res = calcular_cenario(0, pr, com, "preco", canal, st.session_state.custo_final, impostos, peso_val, is_full, armaz_val)
         else:
-            mg = c2.text_input("Margem %", value=st.session_state.marg_uni if st.session_state.marg_uni else "15.0", key="marg_uni")
-            res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_calc, is_full, armaz_calc)
+            mg = c2.text_input("Margem %", key="marg_uni")
+            if not mg: mg = "15.0"
+            res = calcular_cenario(mg, 0, com, "margem", canal, st.session_state.custo_final, impostos, peso_val, is_full, armaz_val)
         card_resultado("Resultado", res)
 
 with tab2:
     st.markdown("### ☁️ Cadastro")
     
-    # 1. Carrega Produtos ÚNICOS (Remove duplicatas pelo SKU mantendo o último)
+    # 1. Carrega Produtos e Remove Duplicatas
     df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso FROM produtos ORDER BY id DESC")
     
     lista_prods = ["✨ Novo Produto"]
     dados_map = {}
     
     if not df.empty:
-        # Remove duplicatas de SKU (mantém o primeiro que aparecer, que é o último ID pois ordenamos DESC)
+        # Remove duplicatas de SKU mantendo o mais recente (primeiro da lista pois order by id desc)
         df_unicos = df.drop_duplicates(subset=['sku'])
-        df_unicos = df_unicos.sort_values(by='nome') # Ordena por nome para o selectbox
+        df_unicos = df_unicos.sort_values(by='nome')
         
         for _, row in df_unicos.iterrows():
             lbl = f"{row['sku']} - {row['nome']}"
@@ -296,19 +310,20 @@ with tab2:
         if st.session_state.get('last_loaded') != sel:
             d = dados_map[sel]
             st.session_state.prod_id = d['id']
+            # Strings diretas
             st.session_state.in_sku = str(d['sku'])
             st.session_state.in_nome = str(d['nome'])
             st.session_state.in_forn = str(d['fornecedor'] or "")
             st.session_state.in_nf = str(d['nro_nf'] or "")
             st.session_state.in_qtd = str(d['quantidade'])
             
-            # Formatação segura para inputs de texto
+            # Formatação de valores (se nulo, poe zero)
             st.session_state.pc_cad = f"{d['preco_partida']:.2f}"
             st.session_state.ipi_cad = f"{d['ipi_percent']:.2f}"
             st.session_state.icmsp_cad = f"{d['icms_percent']:.2f}"
             st.session_state.peso_cad = f"{d['peso']:.3f}" if d['peso'] else "0.000"
             
-            # Espelhamento Sidebar (Se banco for 0, deixa padrão)
+            # ESPELHAMENTO SIDEBAR (Mantém o que veio do banco)
             st.session_state.sb_peso = f"{d['peso']:.3f}" if (d['peso'] and float(d['peso']) > 0) else "0.300"
             st.session_state.sb_icms = f"{d['icms_percent']:.2f}" if (d['icms_percent'] and float(d['icms_percent']) > 0) else "18.00"
             
@@ -319,6 +334,7 @@ with tab2:
         if st.session_state.get('last_loaded') != "NOVO":
             st.session_state.prod_id = None
             st.session_state.last_loaded = "NOVO"
+            # Limpa campos chave
             for k in ['pc_cad', 'ipi_cad', 'peso_cad', 'in_sku', 'in_nome']: st.session_state[k] = ""
             st.rerun()
 
@@ -362,6 +378,10 @@ with tab2:
                 )
                 st.session_state.custo_final = res['custo_final']
                 st.session_state.detalhes_custo = res
+                
+                # REFORÇA OS VALORES DA SIDEBAR PARA NÃO ZERAR
+                # Se o usuário não mexeu, mantém o que tá na session_state. 
+                # O rerun redesenha a sidebar com o que estiver em session_state.
                 st.rerun()
 
             if b2.button("💾 Salvar Novo", type="primary"):
@@ -423,6 +443,7 @@ with st.sidebar:
     
     with st.expander("🛠️ Parâmetros & Tributos", expanded=True):
         c1, c2 = st.columns(2)
+        # Inputs que persistem o estado. Key é suficiente.
         st.text_input("ICMS (%)", key="sb_icms")
         st.text_input("DIFAL (%)", key="sb_difal")
         
