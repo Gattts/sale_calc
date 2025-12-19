@@ -39,15 +39,12 @@ st.markdown("""
         font-size: 13px; font-weight: 600; color: #333; 
         display: flex; justify-content: space-between;
     }
-    /* Ajuste para inputs numéricos */
-    div[data-testid="stNumberInput"] input {
-        font-size: 14px;
-    }
+    div[data-testid="stNumberInput"] input { font-size: 14px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CONEXÃO AWS E MIGRAÇÃO AUTOMÁTICA
+# 2. CONEXÃO E FUNÇÕES
 # ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
@@ -57,18 +54,15 @@ DB_NAME = "marketmanager"
 @st.cache_resource
 def get_engine():
     engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
-    # Verifica e cria a coluna peso se não existir
     try:
         with engine.connect() as conn:
-            # Truque: Tenta selecionar peso. Se falhar, cai no except e cria a coluna.
             conn.execute(text("SELECT peso FROM produtos LIMIT 1"))
     except:
         try:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE produtos ADD COLUMN peso DECIMAL(10,3) DEFAULT 0.0"))
                 conn.commit()
-        except:
-            pass # Se der erro aqui, provavelmente a tabela não existe ou outro erro maior
+        except: pass
     return engine
 
 def run_query(query, params=None):
@@ -92,7 +86,7 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. LÓGICA DE NEGÓCIO
+# 3. LÓGICA DE CÁLCULO
 # ==============================================================================
 TABELA_FRETE_ML = {
     "79-99": [(0.3, 11.97), (0.5, 12.87), (1.0, 13.47), (2.0, 14.07), (3.0, 14.97), (4.0, 16.17), (5.0, 17.07), (9.0, 26.67), (13.0, 39.57), (17.0, 44.07), (23.0, 51.57), (30.0, 59.37), (40.0, 61.17), (50.0, 63.27), (60.0, 67.47), (70.0, 72.27), (80.0, 75.57), (90.0, 83.97), (100.0, 95.97), (125.0, 107.37), (150.0, 113.97)],
@@ -113,7 +107,6 @@ def calcular_custo_aquisicao(preco_compra, frete, ipi_pct, outros, st_val, icms_
         base_pis_cofins = max(0, (preco_compra - c_icms_prod) + (frete - c_icms_frete))
         credito_pis = base_pis_cofins * (pis_pct / 100)
         credito_cofins = base_pis_cofins * (cofins_pct / 100)
-    
     total_creditos = credito_icms + credito_pis + credito_cofins
     return {'custo_final': preco_medio - total_creditos, 'preco_medio': preco_medio, 'creditos': total_creditos, 'credito_icms': credito_icms, 'credito_pis': credito_pis, 'credito_cofins': credito_cofins}
 
@@ -136,7 +129,9 @@ def obter_frete_ml_tabela(preco, peso):
     return TABELA_FRETE_ML[faixa][-1][1]
 
 def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_final, impostos_venda, peso, is_full, armaz):
-    icms, difal, pis, cofins = impostos_venda['icms']/100, impostos_venda['difal']/100, 0.0165, 0.0760
+    icms = impostos_venda['icms']/100
+    difal = impostos_venda['difal']/100
+    pis, cofins = 0.0165, 0.0760
     
     taxa_imposto_total = icms + difal + ((1-icms) * (pis + cofins))
     perc_variaveis = taxa_imposto_total + (comissao/100) + (armaz/100 if not is_full else 0.0)
@@ -145,8 +140,7 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
     if is_full: custo_fixo_extra += custo_final * (armaz/100)
     if "Shopee" in canal: taxa_extra += 4.00 
     
-    preco, margem_real = 0.0, 0.0
-
+    preco = 0.0
     if modo == "preco":
         preco = preco_manual
         if "Mercado Livre" in canal:
@@ -168,13 +162,10 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
             preco_t1 = (custos_base + frete_estimado) / divisor
             frete_real = obter_frete_ml_tabela(preco_t1, peso)
             preco_final_t1 = (custos_base + frete_real) / divisor
-            
             if preco_final_t1 >= 79.00:
                 preco, frete = preco_final_t1, frete_real
             else:
-                taxa_tentativa = 6.75
-                preco_t2 = (custos_base + taxa_tentativa) / divisor
-                taxa_real = obter_taxa_fixa_ml(preco_t2)
+                taxa_real = obter_taxa_fixa_ml((custos_base + 6.75) / divisor)
                 preco = (custos_base + taxa_real) / divisor
                 taxa_extra += taxa_real
                 frete = 0.0
@@ -182,11 +173,11 @@ def calcular_cenario(margem_alvo, preco_manual, comissao, modo, canal, custo_fin
             preco = custos_base / divisor
         margem_real = margem_alvo
 
-    v_icms, v_difal = preco * icms, preco * difal
+    v_icms = preco * icms
+    v_difal = preco * difal
     v_pis_cofins = preco * (1-icms) * (pis + cofins)
     v_comissao = preco * (comissao/100)
     v_armaz_var = preco * (armaz/100) if not is_full else 0.0
-    
     repasse = preco - v_comissao - frete - taxa_extra
     lucro = repasse - (v_icms + v_difal + v_pis_cofins) - custo_final - v_armaz_var - custo_fixo_extra
 
@@ -210,73 +201,60 @@ def exibir_card_compacto(titulo, dados):
             <span>🚚 Frete: R$ {dados.get('frete', 0):.2f}</span>
             <span>🤝 Repasse: R$ {dados.get('repasse', 0):.2f}</span>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
+    </div>""", unsafe_allow_html=True)
     d = dados['detalhes']
     with st.expander("🔎 Ver Extrato Detalhado"):
-        tabela_dados = [
-            {"Descrição": "➕ Preço de Venda", "Valor": f"R$ {d['venda_bruta']:,.2f}"},
-            {"Descrição": f"➖ ICMS ({d['icms_pct']:.1f}%)", "Valor": f"- R$ {d['v_icms']:,.2f}"},
-            {"Descrição": f"➖ DIFAL ({d['difal_pct']:.1f}%)", "Valor": f"- R$ {d['v_difal']:,.2f}"},
-            {"Descrição": "➖ PIS/COFINS (9.25%)", "Valor": f"- R$ {d['v_pis_cofins']:,.2f}"},
-            {"Descrição": f"➖ Comissão Mkt ({d['comissao_pct']:.1f}%)", "Valor": f"- R$ {d['v_comissao']:,.2f}"},
-            {"Descrição": "➖ Taxa Fixa ML/Shopee", "Valor": f"- R$ {d['v_taxa_fixa']:,.2f}"},
-            {"Descrição": "➖ Frete de Envio", "Valor": f"- R$ {d['v_frete']:,.2f}"},
-            {"Descrição": "➖ Armazenagem/Full", "Valor": f"- R$ {d['v_armaz']:,.2f}"},
-            {"Descrição": "➖ Custo do Produto (CMV)", "Valor": f"- R$ {d['custo_produto']:,.2f}"},
-            {"Descrição": "✅ LUCRO LÍQUIDO", "Valor": f"R$ {dados['lucro']:,.2f}"}
+        tabela = [
+            {"D": "➕ Venda", "V": f"R$ {d['venda_bruta']:,.2f}"},
+            {"D": f"➖ ICMS ({d['icms_pct']:.1f}%)", "V": f"- R$ {d['v_icms']:,.2f}"},
+            {"D": f"➖ DIFAL ({d['difal_pct']:.1f}%)", "V": f"- R$ {d['v_difal']:,.2f}"},
+            {"D": "➖ PIS/COF", "V": f"- R$ {d['v_pis_cofins']:,.2f}"},
+            {"D": f"➖ Mkt ({d['comissao_pct']:.1f}%)", "V": f"- R$ {d['v_comissao']:,.2f}"},
+            {"D": "➖ Taxa Fixa", "V": f"- R$ {d['v_taxa_fixa']:,.2f}"},
+            {"D": "➖ Frete", "V": f"- R$ {d['v_frete']:,.2f}"},
+            {"D": "➖ Armaz/Full", "V": f"- R$ {d['v_armaz']:,.2f}"},
+            {"D": "➖ Custo Prod", "V": f"- R$ {d['custo_produto']:,.2f}"},
+            {"D": "✅ LUCRO", "V": f"R$ {dados['lucro']:,.2f}"}
         ]
-        st.table(pd.DataFrame(tabela_dados))
+        st.table(pd.DataFrame(tabela))
 
 # ==============================================================================
-# 4. GESTÃO DE ESTADO
+# 4. INICIALIZAÇÃO DE ESTADO (OBRIGATÓRIO PARA SIDEBAR NO FINAL)
 # ==============================================================================
 if 'custo_final' not in st.session_state: st.session_state.custo_final = 0.0
 if 'detalhes_custo' not in st.session_state: st.session_state.detalhes_custo = {}
 if 'prod_id_selecionado' not in st.session_state: st.session_state.prod_id_selecionado = None
 
-# Inicializa variáveis da sidebar (obrigatório para usar key)
+# Inicializa chaves da sidebar com valores padrão
+if 'sb_canal' not in st.session_state: st.session_state.sb_canal = "Mercado Livre"
 if 'sb_peso' not in st.session_state: st.session_state.sb_peso = 0.3
 if 'sb_icms' not in st.session_state: st.session_state.sb_icms = 18.0
+if 'sb_difal' not in st.session_state: st.session_state.sb_difal = 0.0
+if 'sb_armaz' not in st.session_state: st.session_state.sb_armaz = 0.0
+if 'sb_full' not in st.session_state: st.session_state.sb_full = False
 
 # ==============================================================================
-# 5. SIDEBAR
-# ==============================================================================
-with st.sidebar:
-    st.title("🚀 Market Manager")
-    st.markdown("---")
-    canal = st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"])
-    
-    with st.expander("🛠️ Parâmetros & Tributos", expanded=True):
-        c1, c2 = st.columns(2)
-        # IMPORTANTE: Apenas KEY, sem VALUE (para espelhamento funcionar + edição)
-        icms_venda = c1.number_input("ICMS (%)", min_value=0.0, max_value=100.0, step=0.5, key="sb_icms")
-        difal = c2.number_input("DIFAL (%)", min_value=0.0, max_value=100.0, step=0.5, value=0.0)
-        
-        c3, c4 = st.columns(2)
-        # IMPORTANTE: Apenas KEY, sem VALUE
-        peso = c3.number_input("Peso (Kg)", min_value=0.0, step=0.1, key="sb_peso")
-        armaz = c4.number_input("Armaz. (%)", min_value=0.0, step=0.5, value=0.0)
-        is_full = st.toggle("⚡ Full Fulfillment", False)
-
-    st.markdown("---")
-    st.info(f"💰 Custo Base: **R$ {st.session_state.custo_final:,.2f}**")
-
-# ==============================================================================
-# 6. ÁREA PRINCIPAL
+# 5. ÁREA PRINCIPAL (TABS) - Executada ANTES da Sidebar
 # ==============================================================================
 tab1, tab2 = st.tabs(["🧮 Calculadora", "📝 Cadastro (DB)"])
 
 with tab1:
-    st.markdown(f"### 🏷️ Simulação: {canal}")
+    # Lê valores diretamente do Session State (pois a sidebar ainda não foi desenhada)
+    canal_atual = st.session_state.sb_canal
+    peso_atual = st.session_state.sb_peso
+    icms_atual = st.session_state.sb_icms
+    difal_atual = st.session_state.sb_difal
+    armaz_atual = st.session_state.sb_armaz
+    full_atual = st.session_state.sb_full
+
+    st.markdown(f"### 🏷️ Simulação: {canal_atual}")
     if st.session_state.custo_final <= 0: st.warning("⚠️ Defina o custo na aba 'Cadastro'.")
 
     tipo_calculo = st.radio("Objetivo:", ["🎯 Margem (%)", "💵 Preço Fixo (R$)"], horizontal=True)
     modo = "margem" if "Margem" in tipo_calculo else "preco"
-    impostos = {'icms': icms_venda, 'difal': difal}
+    impostos = {'icms': icms_atual, 'difal': difal_atual}
 
-    if "Mercado Livre" in canal:
+    if "Mercado Livre" in canal_atual:
         col_c, col_p = st.columns(2)
         with col_c:
             st.markdown("#### 🔹 Clássico")
@@ -284,9 +262,9 @@ with tab1:
             marg_c = st.number_input("Margem (%)", value=15.0, step=0.5, key="marg_cla")
             if modo == "preco":
                 pr_c = st.number_input("Preço (R$)", value=100.0, step=1.0, key="pr_cla")
-                res_c = calcular_cenario(0, pr_c, com_c, "preco", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
+                res_c = calcular_cenario(0, pr_c, com_c, "preco", canal_atual, st.session_state.custo_final, impostos, peso_atual, full_atual, armaz_atual)
             else:
-                res_c = calcular_cenario(marg_c, 0, com_c, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
+                res_c = calcular_cenario(marg_c, 0, com_c, "margem", canal_atual, st.session_state.custo_final, impostos, peso_atual, full_atual, armaz_atual)
             exibir_card_compacto("Sugestão Clássico", res_c)
 
         with col_p:
@@ -295,22 +273,22 @@ with tab1:
             marg_p = st.number_input("Margem (%)", value=15.0, step=0.5, key="marg_pre")
             if modo == "preco":
                 pr_p = st.number_input("Preço (R$)", value=110.0, step=1.0, key="pr_pre")
-                res_p = calcular_cenario(0, pr_p, com_p, "preco", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
+                res_p = calcular_cenario(0, pr_p, com_p, "preco", canal_atual, st.session_state.custo_final, impostos, peso_atual, full_atual, armaz_atual)
             else:
-                res_p = calcular_cenario(marg_p, 0, com_p, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
+                res_p = calcular_cenario(marg_p, 0, com_p, "margem", canal_atual, st.session_state.custo_final, impostos, peso_atual, full_atual, armaz_atual)
             exibir_card_compacto("Sugestão Premium", res_p)
     else:
         col_u, _ = st.columns([1, 1])
         with col_u:
-            st.markdown(f"#### 🛍️ {canal}")
+            st.markdown(f"#### 🛍️ {canal_atual}")
             com_u = st.number_input("Comissão (%)", value=14.0, step=0.5, key="com_uni")
             marg_u = st.number_input("Margem (%)", value=15.0, step=0.5, key="marg_uni")
             if modo == "preco":
                 pr_u = st.number_input("Preço (R$)", value=100.0, step=1.0, key="pr_uni")
-                res_u = calcular_cenario(0, pr_u, com_u, "preco", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
+                res_u = calcular_cenario(0, pr_u, com_u, "preco", canal_atual, st.session_state.custo_final, impostos, peso_atual, full_atual, armaz_atual)
             else:
-                res_u = calcular_cenario(marg_u, 0, com_u, "margem", canal, st.session_state.custo_final, impostos, peso, is_full, armaz)
-            exibir_card_compacto(f"Sugestão {canal}", res_u)
+                res_u = calcular_cenario(marg_u, 0, com_u, "margem", canal_atual, st.session_state.custo_final, impostos, peso_atual, full_atual, armaz_atual)
+            exibir_card_compacto(f"Sugestão {canal_atual}", res_u)
 
 with tab2:
     st.markdown("### ☁️ Cadastro de Produtos")
@@ -320,7 +298,6 @@ with tab2:
     
     opcoes_busca = ["✨ Novo Produto"]
     mapa_dados = {}
-    
     if not df_prods.empty:
         df_prods['label'] = df_prods['sku'] + " - " + df_prods['nome']
         for _, row in df_prods.iterrows():
@@ -330,7 +307,7 @@ with tab2:
 
     produto_selecionado = st.selectbox("🔍 Buscar no Banco:", options=opcoes_busca)
 
-    # Lógica de Carregamento e Espelhamento
+    # Lógica de Carregamento (Aqui atualizamos o estado ANTES da sidebar ser desenhada)
     if produto_selecionado != "✨ Novo Produto":
         if st.session_state.get('ultimo_prod_carregado') != produto_selecionado:
             d = mapa_dados[produto_selecionado]
@@ -346,31 +323,26 @@ with tab2:
                 'ipi_cad': float(d['ipi_percent']), 
                 'icmsp_cad': float(d['icms_percent']),
                 'peso_cad': float(d['peso']) if d['peso'] else 0.0,
-                'icmsf_cad': 0.0, # Reset padrão
-                'out_cad': 0.0,   # Reset padrão
-                'st_cad': 0.0,    # Reset padrão
-                'fr_cad': 0.0,    # Reset padrão
+                'icmsf_cad': 0.0, 'out_cad': 0.0, 'st_cad': 0.0, 'fr_cad': 0.0,
                 'ultimo_prod_carregado': produto_selecionado
             })
             
-            # --- ESPELHAMENTO PARA A SIDEBAR (CALCULADORA) ---
+            # --- ESPELHAMENTO SEGURO (Atualiza estado que será lido pela sidebar depois) ---
             st.session_state.sb_peso = float(d['peso']) if d['peso'] else 0.0
             st.session_state.sb_icms = float(d['icms_percent'])
             
             st.toast(f"Carregado: {d['nome']}", icon="📂")
-            time.sleep(0.1)
-            st.rerun() # Atualiza visualmente a sidebar
+            st.rerun() # Rerun para garantir que Tab 1 veja os novos valores
     else:
         if st.session_state.get('ultimo_prod_carregado') != "NOVO":
             st.session_state.prod_id_selecionado = None
             st.session_state['ultimo_prod_carregado'] = "NOVO"
-            # Limpa campos
             st.session_state.pc_cad = 0.0
             st.session_state.peso_cad = 0.0
             st.rerun()
 
+    # Formulário Cadastro
     col_form, col_resumo = st.columns([0.80, 0.20])
-    
     with col_form:
         with st.container(border=True):
             st.caption("1. Dados Principais")
@@ -387,7 +359,6 @@ with tab2:
 
             st.caption("3. Custos Unitários & Logística")
             k1, k2, k3 = st.columns(3)
-            # Inputs com key mas sem value (leem do session_state)
             pc = k1.number_input("Preço Compra (R$)", min_value=0.0, step=1.0, format="%.2f", key="pc_cad")
             frete = k2.number_input("Frete Compra (R$)", min_value=0.0, step=1.0, format="%.2f", key="fr_cad")
             ipi = k3.number_input("IPI (%)", min_value=0.0, step=0.5, format="%.2f", key="ipi_cad")
@@ -408,12 +379,11 @@ with tab2:
                 res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
                 st.session_state.custo_final = res['custo_final']
                 st.session_state.detalhes_custo = res
-                st.rerun() # Rerun essencial para atualizar o card na sidebar
+                st.rerun()
 
             if b2.button("💾 Salvar Novo", type="primary", use_container_width=True):
                 if sku_val and nome_val:
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    # INSERT atualizado
                     sql = """INSERT INTO produtos (sku, nome, fornecedor, nro_nf, quantidade, preco_partida, ipi_percent, icms_percent, preco_final, peso, data_compra) 
                              VALUES (:sku, :nome, :forn, :nf, :qtd, :pp, :ipi, :icms, :pf, :peso, :dt)"""
                     params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "peso": peso_prod, "dt": date.today()}
@@ -425,7 +395,6 @@ with tab2:
             if st.session_state.prod_id_selecionado:
                 if b3.button("✏️ Atualizar", use_container_width=True):
                     res = calcular_custo_aquisicao(pc, frete, ipi, outros, st_val, icms_frete, icms_prod, 1.65, 7.60, l_real)
-                    # UPDATE atualizado
                     sql = """UPDATE produtos SET sku=:sku, nome=:nome, fornecedor=:forn, nro_nf=:nf, quantidade=:qtd, 
                              preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf, peso=:peso WHERE id=:id"""
                     params = {"sku": sku_val, "nome": nome_val, "forn": forn_val, "nf": nf_val, "qtd": qtd_val, "pp": pc, "ipi": ipi, "icms": icms_prod, "pf": res['custo_final'], "peso": peso_prod, "id": st.session_state.prod_id_selecionado}
@@ -445,3 +414,26 @@ with tab2:
                 st.write(f"**ICMS Rec:** R$ {d.get('credito_icms', 0):.2f}")
                 st.write(f"**PIS/COF:** R$ {d.get('credito_pis', 0) + d.get('credito_cofins', 0):.2f}")
                 st.success(f"**Total Créditos:** R$ {d.get('creditos', 0):.2f}")
+
+# ==============================================================================
+# 6. SIDEBAR (EXECUTADA POR ÚLTIMO)
+# ==============================================================================
+with st.sidebar:
+    st.title("🚀 Market Manager")
+    st.markdown("---")
+    # Usa chave sb_canal
+    st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"], key="sb_canal")
+    
+    with st.expander("🛠️ Parâmetros & Tributos", expanded=True):
+        c1, c2 = st.columns(2)
+        # Widgets conectados ao Session State através da KEY. O Streamlit gerencia a leitura.
+        st.number_input("ICMS (%)", min_value=0.0, max_value=100.0, step=0.5, key="sb_icms")
+        st.number_input("DIFAL (%)", min_value=0.0, max_value=100.0, step=0.5, key="sb_difal")
+        
+        c3, c4 = st.columns(2)
+        st.number_input("Peso (Kg)", min_value=0.0, step=0.1, key="sb_peso")
+        st.number_input("Armaz. (%)", min_value=0.0, step=0.5, key="sb_armaz")
+        st.toggle("⚡ Full Fulfillment", key="sb_full")
+
+    st.markdown("---")
+    st.info(f"💰 Custo Base: **R$ {st.session_state.custo_final:,.2f}**")
