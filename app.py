@@ -11,7 +11,12 @@ st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="�
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; max-width: 98%; }
+    /* 1. Ajuste de Espaçamento no Topo */
+    .block-container { 
+        padding-top: 1rem !important; 
+        padding-bottom: 1rem !important; 
+        max-width: 99%; 
+    }
     .stButton>button { border-radius: 6px; font-weight: bold; height: 2.8em; }
     
     /* Cards de Resultado */
@@ -20,19 +25,22 @@ st.markdown("""
         padding: 15px; text-align: center; margin-bottom: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .card-price { font-size: 24px; font-weight: 800; color: #1E88E5; margin: 0; }
+    .card-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+    .card-price { font-size: 26px; font-weight: 800; color: #1E88E5; margin: 0; line-height: 1.1; }
+    .card-profit { font-size: 18px; font-weight: bold; color: #2E7D32; margin-top: 5px; }
     .card-footer { 
         margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; 
-        font-size: 13px; font-weight: 600; display: flex; justify-content: space-between;
+        font-size: 13px; font-weight: 600; color: #333; 
+        display: flex; justify-content: space-between;
     }
     div[data-testid="stTextInput"] input { font-size: 15px; }
     div[data-testid="stTextInput"] label { font-size: 13px; margin-bottom: 2px; }
-    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+    div[data-testid="stMetricValue"] { font-size: 1.4rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CONEXÃO
+# 2. CONEXÃO E FUNÇÕES
 # ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
@@ -42,6 +50,7 @@ DB_NAME = "marketmanager"
 @st.cache_resource
 def get_engine():
     engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
+    # Garante estrutura
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT peso FROM produtos LIMIT 1"))
@@ -72,7 +81,7 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. LÓGICA
+# 3. LÓGICA DE NEGÓCIO E CONVERSÃO
 # ==============================================================================
 def str_to_float(valor_str):
     if not valor_str: return 0.0
@@ -200,25 +209,22 @@ def card_resultado(titulo, dados):
 # 4. GESTÃO DE ESTADO
 # ==============================================================================
 if 'custo_final' not in st.session_state: st.session_state.custo_final = 0.0
-if 'prod_selecionado' not in st.session_state: st.session_state.prod_selecionado = None
-
-keys_texto = ['in_sku', 'in_nome', 'in_forn', 'in_nf', 'in_qtd', 
-              'pc_cad', 'fr_cad', 'ipi_cad', 'peso_cad', 'icmsp_cad', 'icmsf_cad', 'out_cad', 'st_cad',
-              'sb_icms', 'sb_difal', 'sb_peso', 'sb_armaz',
-              'com_cla', 'marg_cla', 'pr_cla', 'com_pre', 'marg_pre', 'pr_pre', 'com_uni', 'marg_uni', 'pr_uni',
-              'upd_pc', 'upd_fr', 'upd_ipi', 'upd_peso', 'upd_icmsp', 'upd_icmsf', 'upd_out', 'upd_st']
-
-for k in keys_texto:
+# Se não existem, cria as chaves para evitar erro
+keys = ['in_sku', 'in_nome', 'in_forn', 'in_nf', 'in_qtd', 'pc_cad', 'fr_cad', 'ipi_cad', 
+        'peso_cad', 'icmsp_cad', 'icmsf_cad', 'out_cad', 'st_cad', 'sb_icms', 'sb_difal', 'sb_peso', 'sb_armaz',
+        'com_cla', 'marg_cla', 'pr_cla', 'com_pre', 'marg_pre', 'pr_pre', 'com_uni', 'marg_uni', 'pr_uni',
+        'upd_pc', 'upd_fr', 'upd_ipi', 'upd_peso', 'upd_icmsp', 'upd_icmsf', 'upd_out', 'upd_st']
+for k in keys:
     if k not in st.session_state: st.session_state[k] = ""
 
 # ==============================================================================
-# 5. MODAL ATUALIZAÇÃO
+# 5. MODAL DE ATUALIZAÇÃO
 # ==============================================================================
 @st.dialog("✏️ Atualizar Custos do Produto")
 def dialog_atualizar_produto(prod_id, dados_iniciais):
     st.caption(f"Editando: {dados_iniciais['nome']}")
     
-    # Preenche inputs com valores iniciais se estiverem vazios no state
+    # Preenche se vazio
     if not st.session_state.upd_pc:
         st.session_state.upd_pc = f"{dados_iniciais['preco_partida']:.2f}"
         st.session_state.upd_ipi = f"{dados_iniciais['ipi_percent']:.2f}"
@@ -270,7 +276,7 @@ def dialog_atualizar_produto(prod_id, dados_iniciais):
         
         if run_command(sql, params):
             st.toast("Produto Atualizado!", icon="✅")
-            # Limpa estado do modal
+            # Limpa modal
             for k in ['upd_pc', 'upd_fr', 'upd_ipi', 'upd_peso', 'upd_icmsp', 'upd_icmsf', 'upd_out', 'upd_st']:
                 st.session_state[k] = ""
             time.sleep(1)
@@ -284,18 +290,19 @@ tab1, tab2 = st.tabs(["🧮 Calculadora", "📝 Cadastro (DB)"])
 with tab1:
     canal = st.session_state.get('sb_canal', 'Mercado Livre')
     st.markdown(f"### 🏷️ {canal}")
-    if st.session_state.custo_final <= 0: st.warning("⚠️ Custo zerado. Selecione um produto.")
+    if st.session_state.custo_final <= 0: st.warning("⚠️ Custo zerado. Selecione um produto na aba Cadastro.")
 
     tipo = st.radio("Meta:", ["Margem (%)", "Preço (R$)"], horizontal=True, label_visibility="collapsed")
     modo = "margem" if "Margem" in tipo else "preco"
     
-    icms_val = st.session_state.sb_icms if st.session_state.sb_icms else "18.0"
-    difal_val = st.session_state.sb_difal if st.session_state.sb_difal else "0.0"
-    peso_val = st.session_state.sb_peso if st.session_state.sb_peso else "0.3"
-    armaz_val = st.session_state.sb_armaz if st.session_state.sb_armaz else "0.0"
+    # Pega valores da sidebar (que ainda vai renderizar, mas estão no session state)
+    icms_val = st.session_state.sb_icms if st.session_state.get('sb_icms') else "18.0"
+    difal_val = st.session_state.sb_difal if st.session_state.get('sb_difal') else "0.0"
+    peso_val = st.session_state.sb_peso if st.session_state.get('sb_peso') else "0.3"
+    armaz_val = st.session_state.sb_armaz if st.session_state.get('sb_armaz') else "0.0"
+    is_full = st.session_state.get('sb_full', False)
     
     impostos = {'icms': icms_val, 'difal': difal_val}
-    is_full = st.session_state.get('sb_full', False)
     
     if "Mercado Livre" in canal:
         c1, c2 = st.columns(2)
@@ -347,13 +354,14 @@ with tab1:
 with tab2:
     st.markdown("### ☁️ Cadastro")
     
+    # 1. Carrega Produtos e Remove Duplicatas
     df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso, preco_final FROM produtos ORDER BY id DESC")
     
     lista_prods = ["✨ Novo Produto"]
     dados_map = {}
     
     if not df.empty:
-        # Remove duplicatas de SKU mantendo o mais recente
+        # Remove duplicatas de SKU mantendo o mais recente (primeiro da lista pois order by id desc)
         df_unicos = df.drop_duplicates(subset=['sku'])
         df_unicos = df_unicos.sort_values(by='nome')
         
@@ -364,6 +372,7 @@ with tab2:
 
     sel = st.selectbox("Buscar:", lista_prods)
 
+    # 2. Lógica de Visualização
     if sel == "✨ Novo Produto":
         st.session_state.prod_id = None
         c_form, c_res = st.columns([0.8, 0.2])
@@ -416,11 +425,10 @@ with tab2:
                             st.rerun()
     
     else:
-        # VISUALIZAÇÃO PRODUTO EXISTENTE (CARD APENAS)
+        # MODO PRODUTO EXISTENTE (CARD APENAS)
         d = dados_map[sel]
         
         with st.container(border=True):
-            # Layout em 5 colunas para caber Partida e Final
             cols = st.columns([1, 2.5, 1.5, 1, 1])
             cols[0].markdown(f"**SKU:**\n{d['sku']}")
             cols[1].markdown(f"**Produto:**\n{d['nome']}")
@@ -437,18 +445,21 @@ with tab2:
             # Botão para Enviar para a Calculadora
             if b_col1.button("🚀 Usar na Calculadora", use_container_width=True):
                 st.session_state.custo_final = float(d['preco_final'])
-                # Espelha valores para a sidebar
+                
+                # ESPELHAMENTO SIDEBAR (Mantém o que veio do banco)
                 st.session_state.sb_peso = f"{d['peso']:.3f}" if (d['peso'] and float(d['peso']) > 0) else "0.300"
                 st.session_state.sb_icms = f"{d['icms_percent']:.2f}" if (d['icms_percent'] and float(d['icms_percent']) > 0) else "18.00"
-                st.toast(f"Valores de '{d['sku']}' enviados para a Calculadora!", icon="🚀")
-                # Rerun para atualizar a sidebar imediatamente
+                
+                st.toast(f"Valores de '{d['sku']}' enviados!", icon="🚀")
+                # Não precisa de rerun imediato se a sidebar for renderizada depois
+                # Mas para garantir visual imediato em Tabs diferentes:
                 st.rerun()
 
             if b_col2.button("✏️ Atualizar Custos", type="primary", use_container_width=True):
                 dialog_atualizar_produto(d['id'], d)
 
 # ==============================================================================
-# 7. SIDEBAR (POR ULTIMO)
+# 7. SIDEBAR (RENDERIZADA NO FINAL PARA PEGAR UPDATES)
 # ==============================================================================
 with st.sidebar:
     st.title("🚀 Market Manager")
