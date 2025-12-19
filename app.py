@@ -5,19 +5,13 @@ from datetime import date
 import time
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILO (Espaçamento Corrigido)
+# 1. CONFIGURAÇÃO E ESTILO
 # ==============================================================================
 st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="🚀")
 
 st.markdown("""
 <style>
-    /* 1. Ajuste de Espaçamento no Topo */
-    .block-container { 
-        padding-top: 1rem !important; 
-        padding-bottom: 1rem !important; 
-        max-width: 98%; 
-    }
-    
+    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; max-width: 98%; }
     .stButton>button { border-radius: 6px; font-weight: bold; height: 2.8em; }
     
     /* Cards de Resultado */
@@ -33,11 +27,12 @@ st.markdown("""
     }
     div[data-testid="stTextInput"] input { font-size: 15px; }
     div[data-testid="stTextInput"] label { font-size: 13px; margin-bottom: 2px; }
+    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CONEXÃO E FUNÇÕES DO BANCO
+# 2. CONEXÃO
 # ==============================================================================
 DB_HOST = "market-db.clsgwcgyufqp.us-east-2.rds.amazonaws.com"
 DB_USER = "admin"
@@ -77,7 +72,7 @@ def run_command(query, params):
         return False
 
 # ==============================================================================
-# 3. LÓGICA E CONVERSÃO
+# 3. LÓGICA
 # ==============================================================================
 def str_to_float(valor_str):
     if not valor_str: return 0.0
@@ -210,60 +205,74 @@ if 'prod_selecionado' not in st.session_state: st.session_state.prod_selecionado
 keys_texto = ['in_sku', 'in_nome', 'in_forn', 'in_nf', 'in_qtd', 
               'pc_cad', 'fr_cad', 'ipi_cad', 'peso_cad', 'icmsp_cad', 'icmsf_cad', 'out_cad', 'st_cad',
               'sb_icms', 'sb_difal', 'sb_peso', 'sb_armaz',
-              'com_cla', 'marg_cla', 'pr_cla', 'com_pre', 'marg_pre', 'pr_pre', 'com_uni', 'marg_uni', 'pr_uni']
+              'com_cla', 'marg_cla', 'pr_cla', 'com_pre', 'marg_pre', 'pr_pre', 'com_uni', 'marg_uni', 'pr_uni',
+              'upd_pc', 'upd_fr', 'upd_ipi', 'upd_peso', 'upd_icmsp', 'upd_icmsf', 'upd_out', 'upd_st']
 
 for k in keys_texto:
     if k not in st.session_state: st.session_state[k] = ""
 
 # ==============================================================================
-# 5. MODAL DE ATUALIZAÇÃO (POP-UP)
+# 5. MODAL ATUALIZAÇÃO
 # ==============================================================================
 @st.dialog("✏️ Atualizar Custos do Produto")
 def dialog_atualizar_produto(prod_id, dados_iniciais):
     st.caption(f"Editando: {dados_iniciais['nome']}")
     
-    # Inputs dentro do Modal (usamos chaves 'upd_' para não conflitar)
+    # Preenche inputs com valores iniciais se estiverem vazios no state
+    if not st.session_state.upd_pc:
+        st.session_state.upd_pc = f"{dados_iniciais['preco_partida']:.2f}"
+        st.session_state.upd_ipi = f"{dados_iniciais['ipi_percent']:.2f}"
+        st.session_state.upd_icmsp = f"{dados_iniciais['icms_percent']:.2f}"
+        st.session_state.upd_peso = f"{dados_iniciais['peso']:.3f}" if dados_iniciais['peso'] else "0.000"
+
     c1, c2, c3 = st.columns(3)
-    upd_pc = c1.text_input("Preço Compra (R$)", value=f"{dados_iniciais['preco_partida']:.2f}", key="upd_pc")
-    upd_fr = c2.text_input("Frete Compra (R$)", value="0.00", key="upd_fr") # Assumindo 0 ou criar campo no banco
-    upd_ipi = c3.text_input("IPI (%)", value=f"{dados_iniciais['ipi_percent']:.2f}", key="upd_ipi")
+    st.text_input("Preço Compra (R$)", key="upd_pc")
+    st.text_input("Frete Compra (R$)", key="upd_fr")
+    st.text_input("IPI (%)", key="upd_ipi")
     
     c4, c5, c6 = st.columns(3)
-    upd_peso = c4.text_input("Peso (Kg)", value=f"{dados_iniciais['peso']:.3f}" if dados_iniciais['peso'] else "0.000", key="upd_peso")
-    upd_icmsp = c5.text_input("ICMS Prod (%)", value=f"{dados_iniciais['icms_percent']:.2f}", key="upd_icmsp")
-    upd_icmsf = c6.text_input("ICMS Frete (%)", value="0.00", key="upd_icmsf")
+    st.text_input("Peso (Kg)", key="upd_peso")
+    st.text_input("ICMS Prod (%)", key="upd_icmsp")
+    st.text_input("ICMS Frete (%)", key="upd_icmsf")
     
     c7, c8, c9 = st.columns(3)
-    upd_out = c7.text_input("Outros (R$)", value="0.00", key="upd_out")
-    upd_st = c8.text_input("ST (R$)", value="0.00", key="upd_st")
-    upd_lreal = st.toggle("Lucro Real", value=True, key="upd_lreal")
+    st.text_input("Outros (R$)", key="upd_out")
+    st.text_input("ST (R$)", key="upd_st")
+    lreal = st.toggle("Lucro Real", value=True)
     
     st.divider()
     
-    # Botão de Cálculo Prévio no Modal
     if st.button("🔄 Simular Novo Custo", use_container_width=True):
-        res = calcular_custo_aquisicao(upd_pc, upd_fr, upd_ipi, upd_out, upd_st, upd_icmsf, upd_icmsp, upd_lreal)
+        res = calcular_custo_aquisicao(
+            st.session_state.upd_pc, st.session_state.upd_fr, st.session_state.upd_ipi, 
+            st.session_state.upd_out, st.session_state.upd_st, st.session_state.upd_icmsf, 
+            st.session_state.upd_icmsp, lreal
+        )
         st.info(f"Novo Custo Final Calculado: **R$ {res['custo_final']:.2f}**")
-        st.session_state['temp_custo_calc'] = res['custo_final'] # Guarda temporariamente
 
     if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-        # Recalcula para garantir o valor final
-        res_final = calcular_custo_aquisicao(upd_pc, upd_fr, upd_ipi, upd_out, upd_st, upd_icmsf, upd_icmsp, upd_lreal)
-        
-        novo_peso = str_to_float(upd_peso)
-        novo_pp = str_to_float(upd_pc)
-        novo_ipi = str_to_float(upd_ipi)
-        novo_icmsp = str_to_float(upd_icmsp)
+        res_final = calcular_custo_aquisicao(
+            st.session_state.upd_pc, st.session_state.upd_fr, st.session_state.upd_ipi, 
+            st.session_state.upd_out, st.session_state.upd_st, st.session_state.upd_icmsf, 
+            st.session_state.upd_icmsp, lreal
+        )
         
         sql = """UPDATE produtos SET preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, 
                  preco_final=:pf, peso=:peso WHERE id=:id"""
         params = {
-            "pp": novo_pp, "ipi": novo_ipi, "icms": novo_icmsp,
-            "pf": res_final['custo_final'], "peso": novo_peso, "id": prod_id
+            "pp": str_to_float(st.session_state.upd_pc), 
+            "ipi": str_to_float(st.session_state.upd_ipi), 
+            "icms": str_to_float(st.session_state.upd_icmsp),
+            "pf": res_final['custo_final'], 
+            "peso": str_to_float(st.session_state.upd_peso), 
+            "id": prod_id
         }
         
         if run_command(sql, params):
-            st.toast("Produto Atualizado com Sucesso!", icon="✅")
+            st.toast("Produto Atualizado!", icon="✅")
+            # Limpa estado do modal
+            for k in ['upd_pc', 'upd_fr', 'upd_ipi', 'upd_peso', 'upd_icmsp', 'upd_icmsf', 'upd_out', 'upd_st']:
+                st.session_state[k] = ""
             time.sleep(1)
             st.rerun()
 
@@ -338,7 +347,6 @@ with tab1:
 with tab2:
     st.markdown("### ☁️ Cadastro")
     
-    # 1. Carrega Produtos
     df = run_query("SELECT id, sku, nome, fornecedor, preco_partida, ipi_percent, icms_percent, quantidade, nro_nf, peso, preco_final FROM produtos ORDER BY id DESC")
     
     lista_prods = ["✨ Novo Produto"]
@@ -356,9 +364,7 @@ with tab2:
 
     sel = st.selectbox("Buscar:", lista_prods)
 
-    # 2. Lógica de Visualização (NOVO OU EXISTENTE)
     if sel == "✨ Novo Produto":
-        # MODO CADASTRO NOVO (FORMULÁRIO NA TELA)
         st.session_state.prod_id = None
         c_form, c_res = st.columns([0.8, 0.2])
         with c_form:
@@ -410,29 +416,35 @@ with tab2:
                             st.rerun()
     
     else:
-        # MODO PRODUTO EXISTENTE (VISUALIZAÇÃO + BOTÃO POP-UP)
+        # VISUALIZAÇÃO PRODUTO EXISTENTE (CARD APENAS)
         d = dados_map[sel]
         
-        # Atualiza Sidebar com dados do produto selecionado
-        if st.session_state.get('last_loaded') != sel:
-            st.session_state.custo_final = float(d['preco_final'])
-            st.session_state.sb_peso = f"{d['peso']:.3f}" if (d['peso'] and float(d['peso']) > 0) else "0.300"
-            st.session_state.sb_icms = f"{d['icms_percent']:.2f}" if (d['icms_percent'] and float(d['icms_percent']) > 0) else "18.00"
-            st.session_state.last_loaded = sel
-            st.rerun()
-
-        # Mostra apenas o Card Informativo (Requisição 2)
         with st.container(border=True):
-            cols = st.columns([1, 3, 2, 2])
+            # Layout em 5 colunas para caber Partida e Final
+            cols = st.columns([1, 2.5, 1.5, 1, 1])
             cols[0].markdown(f"**SKU:**\n{d['sku']}")
             cols[1].markdown(f"**Produto:**\n{d['nome']}")
             cols[2].markdown(f"**Fornecedor:**\n{d['fornecedor']}")
-            cols[3].metric("Custo Final", f"R$ {d['preco_final']:,.2f}")
+            
+            # Mostra Partida e Final lado a lado
+            cols[3].metric("💵 Preço NF", f"R$ {d['preco_partida']:,.2f}")
+            cols[4].metric("💰 Custo Final", f"R$ {d['preco_final']:,.2f}")
             
             st.divider()
             
-            # Botão para abrir o Modal de Atualização (Requisição 3)
-            if st.button("✏️ Atualizar Custos", type="primary"):
+            b_col1, b_col2 = st.columns([1, 1])
+            
+            # Botão para Enviar para a Calculadora
+            if b_col1.button("🚀 Usar na Calculadora", use_container_width=True):
+                st.session_state.custo_final = float(d['preco_final'])
+                # Espelha valores para a sidebar
+                st.session_state.sb_peso = f"{d['peso']:.3f}" if (d['peso'] and float(d['peso']) > 0) else "0.300"
+                st.session_state.sb_icms = f"{d['icms_percent']:.2f}" if (d['icms_percent'] and float(d['icms_percent']) > 0) else "18.00"
+                st.toast(f"Valores de '{d['sku']}' enviados para a Calculadora!", icon="🚀")
+                # Rerun para atualizar a sidebar imediatamente
+                st.rerun()
+
+            if b_col2.button("✏️ Atualizar Custos", type="primary", use_container_width=True):
                 dialog_atualizar_produto(d['id'], d)
 
 # ==============================================================================
