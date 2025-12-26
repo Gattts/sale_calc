@@ -1,26 +1,28 @@
 import streamlit as st
 from utils.ui import carregar_css
-from utils.db import run_query
 
-st.set_page_config(page_title="Market Manager - Home", layout="wide", page_icon="🏢")
+# Configuração Global
+st.set_page_config(page_title="Market Manager Pro", layout="wide", page_icon="🛍️")
 carregar_css()
 
-st.title("🏢 Visão Geral")
+# --- Definição das Páginas ---
+# Certifique-se que os arquivos estão na pasta views/
 
-# Métricas do Dashboard
-try:
-    df_prod = run_query("SELECT COUNT(*) as total FROM produtos")
-    total_prods = df_prod['total'][0] if not df_prod.empty else 0
-except:
-    total_prods = 0
+# GRUPO 1: OPERACIONAL
+pg_calc = st.Page("views/calculadora.py", title="Calculadora de Margem", icon="🧮")
+pg_cad = st.Page("views/cadastro.py", title="Cadastro de Produtos", icon="📦")
+pg_hist = st.Page("views/historico.py", title="Histórico de Entradas", icon="🕒")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Empresas Ativas", "1") # Placeholder para o futuro
-col2.metric("Produtos Cadastrados", f"{total_prods}")
-col3.metric("Status do Sistema", "Online 🟢")
+# GRUPO 2: FINANCEIRO
+pg_fin_resumo = st.Page("views/fin_valuation.py", title="Valuation & Estoque", icon="💰")
+pg_fin_contas = st.Page("views/fin_contas.py", title="Contas a Pagar", icon="💸")
+pg_fin_proj = st.Page("views/fin_projecao.py", title="Projeção & Fixos", icon="📈")
 
-from utils.ui import card_meta
-card_meta("100%")
+# --- Navegação ---
 
-st.divider()
-st.info("👈 Selecione uma ferramenta no menu lateral para começar.")
+pg = st.navigation({
+    "Operacional": [pg_calc, pg_cad, pg_hist],
+    "Financeiro": [pg_fin_resumo, pg_fin_contas, pg_fin_proj]
+})
+
+pg.run()
