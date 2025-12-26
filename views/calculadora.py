@@ -12,7 +12,7 @@ defaults = {
     'custo_final': 0.0,
     'sb_regime': 'Lucro Real',
     'sb_origem': 'Nacional / Revenda',
-    'sb_canal': '🟡 Mercado Livre', # Adicionado ao default para segurança
+    'sb_canal': '🟡 Mercado Livre',
     'sb_icms': '18.00', 'sb_difal': '0.00',
     'sb_pis': '1.65', 'sb_cofins': '7.60',
     'sb_peso': '0.300', 'sb_full': False,
@@ -31,7 +31,6 @@ for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# Garante tipos corretos
 try:
     if isinstance(st.session_state.marg_cla, str): st.session_state.marg_cla = float(st.session_state.marg_cla)
     if isinstance(st.session_state.marg_pre, str): st.session_state.marg_pre = float(st.session_state.marg_pre)
@@ -39,7 +38,7 @@ try:
 except: pass
 
 # ==============================================================================
-# 2. FUNÇÕES AUXILIARES
+# 2. FUNÇÕES AUXILIARES & CALLBACKS
 # ==============================================================================
 def safe_float(valor):
     if valor is None or valor == "": return 0.0
@@ -47,27 +46,39 @@ def safe_float(valor):
     try: return float(str(valor).replace(',', '.'))
     except: return 0.0
 
+# --- CALLBACK PARA CARREGAR PRODUTO SEM ERRO DE WIDGET ---
+def callback_carregar(dados):
+    """Atualiza o session_state ANTES da tela ser redesenhada."""
+    st.session_state.custo_final = safe_float(dados['preco_final'])
+    st.session_state.sb_peso = f"{safe_float(dados['peso']):.3f}"
+    st.session_state.sb_icms = f"{safe_float(dados['icms_percent']):.2f}"
+    st.session_state.is_simulation = False 
+    
+    eh_imp = dados.get('importacao_propria', False)
+    if eh_imp:
+        st.session_state.sb_pis = "2.10"
+        st.session_state.sb_cofins = "9.65"
+        st.session_state.sb_origem = "Importação Própria"
+    else:
+        st.session_state.sb_pis = "1.65"
+        st.session_state.sb_cofins = "7.60"
+        st.session_state.sb_origem = "Nacional / Revenda"
+
 def criar_dre_detalhada(preco_venda, custo_prod, comissao_pct, impostos_dict, frete_saida):
     fat = safe_float(preco_venda)
     custo_m = safe_float(custo_prod)
     frete = safe_float(frete_saida)
     pc_com = safe_float(comissao_pct)
     
-    # Impostos
     v_icms = fat * (safe_float(impostos_dict.get('icms')) / 100)
     v_pis = fat * (safe_float(impostos_dict.get('pis')) / 100)
     v_cofins = fat * (safe_float(impostos_dict.get('cofins')) / 100)
     v_difal = fat * (safe_float(impostos_dict.get('difal')) / 100)
     
-    # Taxas
     v_comissao = fat * (pc_com / 100)
     v_fixa = 0.0
-    # Taxa fixa ML
-    if "Mercado Livre" in st.session_state.sb_canal and 0 < fat < 79.00:
-        v_fixa = 6.00 
-    # Taxa fixa Shopee (Exemplo: 3 reais se for o caso, ajustável)
-    if "Shopee" in st.session_state.sb_canal: 
-        v_fixa = 3.00 
+    if "Mercado Livre" in st.session_state.sb_canal and 0 < fat < 79.00: v_fixa = 6.00 
+    if "Shopee" in st.session_state.sb_canal: v_fixa = 3.00 
     
     lucro = fat - (v_icms + v_pis + v_cofins + v_difal) - (v_comissao + v_fixa) - custo_m - frete
     
@@ -112,20 +123,16 @@ def dialog_atualizar(prod_id, dados):
         
         sql = "UPDATE produtos SET preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf, peso=:peso, importacao_propria=:imp WHERE id=:id"
         params = {
-            "pp": safe_float(st.session_state.upd_pc), 
-            "ipi": safe_float(st.session_state.upd_ipi), 
-            "icms": safe_float(st.session_state.upd_icmsp), 
-            "pf": res['custo_final'], 
-            "peso": safe_float(st.session_state.upd_peso), 
-            "imp": is_imp, 
-            "id": prod_id
+            "pp": safe_float(st.session_state.upd_pc), "ipi": safe_float(st.session_state.upd_ipi), 
+            "icms": safe_float(st.session_state.upd_icmsp), "pf": res['custo_final'], 
+            "peso": safe_float(st.session_state.upd_peso), "imp": is_imp, "id": prod_id
         }
         run_command(sql, params)
         
+        # Atualiza sessão manualmente para refletir na hora
         st.session_state.custo_final = res['custo_final']
         st.session_state.sb_peso = st.session_state.upd_peso
         st.session_state.is_simulation = False 
-        
         if is_imp:
             st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
             st.session_state.sb_origem = "Importação Própria"
@@ -174,15 +181,13 @@ def dialog_simular():
         st.switch_page("views/2_cadastro.py")
 
 # ==============================================================================
-# 4. SIDEBAR (REORGANIZADA: CONFIGURAÇÕES NO TOPO)
+# 4. SIDEBAR (ORGANIZADA)
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Configurações de Venda")
     
-    # --- BLOCO 1: CANAL E IMPOSTOS (Lido ANTES do botão carregar) ---
+    # --- BLOCO 1: INPUTS (Desenhados primeiro) ---
     st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"], key="sb_canal")
-    
-    # Origem e Impostos
     st.selectbox("Origem", ["Nacional / Revenda", "Importação Própria"], key="sb_origem", disabled=True) 
     
     c1, c2 = st.columns(2)
@@ -194,7 +199,7 @@ with st.sidebar:
     
     st.divider()
 
-    # --- BLOCO 2: CARREGAR PRODUTO ---
+    # --- BLOCO 2: CARREGAMENTO ---
     st.header("📦 Produto")
     
     if st.session_state.get('is_simulation'):
@@ -219,23 +224,10 @@ with st.sidebar:
                 if sel != "Selecione...":
                     dados = mapa[sel]
                     b1, b2 = st.columns([1,1])
-                    if b1.button("Carregar", use_container_width=True):
-                        # Carrega dados do produto
-                        st.session_state.custo_final = safe_float(dados['preco_final'])
-                        st.session_state.sb_peso = f"{safe_float(dados['peso']):.3f}"
-                        st.session_state.sb_icms = f"{safe_float(dados['icms_percent']):.2f}"
-                        st.session_state.is_simulation = False 
-                        
-                        eh_imp = dados.get('importacao_propria', False)
-                        if eh_imp:
-                            st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
-                            st.session_state.sb_origem = "Importação Própria"
-                        else:
-                            st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
-                            st.session_state.sb_origem = "Nacional / Revenda"
-                        
-                        # Rerun para atualizar a tela com os novos custos
-                        st.rerun()
+                    
+                    # --- BOTÃO COM CALLBACK (CORREÇÃO DO ERRO) ---
+                    # Em vez de 'if button:', usamos 'on_click=funcao'
+                    b1.button("Carregar", use_container_width=True, on_click=callback_carregar, args=(dados,))
                         
                     if b2.button("Editar", use_container_width=True):
                         dialog_atualizar(dados['id'], dados)
@@ -253,7 +245,7 @@ with st.sidebar:
     st.text_input("Peso (Kg)", key="sb_peso")
     st.toggle("⚡ Full", key="sb_full")
     
-    # Feedback Visual
+    # Feedback
     if st.session_state.custo_final > 0:
         val = st.session_state.custo_final
         if st.session_state.get('is_simulation'):
@@ -278,9 +270,7 @@ modo = "margem" if "Margem" in col_mode.radio("Meta:", ["Margem (%)", "Preço (R
 
 st.divider()
 
-# --- LÓGICA DE EXIBIÇÃO POR CANAL ---
 if "Mercado Livre" in st.session_state.sb_canal:
-    # MODO MERCADO LIVRE (2 Colunas)
     c_clas, c_prem = st.columns(2, gap="medium")
     
     with c_clas:
@@ -316,7 +306,6 @@ if "Mercado Livre" in st.session_state.sb_canal:
             st.dataframe(criar_dre_detalhada(res_p['preco'], custo, safe_com_p, impostos, res_p['frete']).style.format({"Valor": "R$ {:,.2f}"}).applymap(lambda v: 'color: #ff4b4b' if v < 0 else 'color: #2e7d32; font-weight: bold', subset=['Valor']), hide_index=True)
 
 else:
-    # MODO OUTROS CANAIS (1 Coluna Centralizada)
     st.markdown(f"### 🛍️ Venda em: {st.session_state.sb_canal}")
     c_std, _ = st.columns([1, 1]) 
     
