@@ -6,43 +6,35 @@ from utils.calculos import calcular_cenario, calcular_custo_aquisicao
 from utils.db import run_query, run_command
 
 # ==============================================================================
-# 1. INICIALIZAÇÃO DE ESTADO (CORRIGIDA)
+# 1. INICIALIZAÇÃO DE ESTADO
 # ==============================================================================
 defaults = {
     'custo_final': 0.0,
     'sb_regime': 'Lucro Real',
     'sb_origem': 'Nacional / Revenda',
-    'sb_icms': '12.00', 'sb_difal': '15.00',
+    'sb_icms': '18.00', 'sb_difal': '0.00',
     'sb_pis': '1.65', 'sb_cofins': '7.60',
-    'sb_peso': '0.000', 'sb_full': False,
-    
-    # --- CORREÇÃO AQUI: Margens devem ser FLOAT, Comissões STR (pois usa text_input) ---
+    'sb_peso': '0.300', 'sb_full': False,
     'com_cla': '11.5', 
-    'marg_cla': 15.0,  # Era '15.0' (texto), agora é 15.0 (número)
+    'marg_cla': 15.0,  # Float para evitar erro de tipo
     'pr_cla': 0.0,
-    
     'com_pre': '16.5', 
-    'marg_pre': 20.0,  # Era '20.0' (texto), agora é 20.0 (número)
+    'marg_pre': 20.0,  # Float para evitar erro de tipo
     'pr_pre': 0.0,
-    
     'upd_pc': '', 'upd_fr': '', 'upd_ipi': '', 'upd_peso': '', 
     'upd_icmsp': '', 'upd_icmsf': '', 'upd_out': '', 'upd_st': '', 'upd_lreal': True,
     'is_simulation': False,
     'draft_cadastro': {}
 }
 
-# Aplica os defaults
 for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# --- PROTEÇÃO CONTRA O ERRO "STR vs FLOAT" ---
-# Se por acaso já existir no cache como string, forçamos a conversão para float agora
+# Garante que margens sejam float (Correção do TypeError anterior)
 try:
-    if isinstance(st.session_state.marg_cla, str):
-        st.session_state.marg_cla = float(st.session_state.marg_cla)
-    if isinstance(st.session_state.marg_pre, str):
-        st.session_state.marg_pre = float(st.session_state.marg_pre)
+    if isinstance(st.session_state.marg_cla, str): st.session_state.marg_cla = float(st.session_state.marg_cla)
+    if isinstance(st.session_state.marg_pre, str): st.session_state.marg_pre = float(st.session_state.marg_pre)
 except:
     st.session_state.marg_cla = 15.0
     st.session_state.marg_pre = 20.0
@@ -51,7 +43,8 @@ except:
 # 2. FUNÇÕES AUXILIARES
 # ==============================================================================
 def safe_float(valor):
-    if not valor: return 0.0
+    """Converte para float de forma segura, aceitando None, string ou número."""
+    if valor is None or valor == "": return 0.0
     if isinstance(valor, (float, int)): return float(valor)
     try: return float(str(valor).replace(',', '.'))
     except: return 0.0
@@ -91,14 +84,14 @@ def criar_dre_detalhada(preco_venda, custo_prod, comissao_pct, impostos_dict, fr
 # ==============================================================================
 # 3. MODAIS
 # ==============================================================================
-@st.dialog("✏️ Editar Produto")
+@st.dialog("Editar Produto")
 def dialog_atualizar(prod_id, dados):
     st.caption(f"Editando: {dados['nome']}")
     if not st.session_state.upd_pc:
-        st.session_state.upd_pc = f"{dados['preco_partida']:.2f}"
-        st.session_state.upd_ipi = f"{dados['ipi_percent']:.2f}" if dados['ipi_percent'] else "0.00"
-        st.session_state.upd_icmsp = f"{dados['icms_percent']:.2f}" if dados['icms_percent'] else "0.00"
-        st.session_state.upd_peso = f"{dados['peso']:.3f}" if dados['peso'] else "0.000"
+        st.session_state.upd_pc = f"{safe_float(dados['preco_partida']):.2f}"
+        st.session_state.upd_ipi = f"{safe_float(dados['ipi_percent']):.2f}"
+        st.session_state.upd_icmsp = f"{safe_float(dados['icms_percent']):.2f}"
+        st.session_state.upd_peso = f"{safe_float(dados['peso']):.3f}"
 
     c1, c2, c3 = st.columns(3)
     st.text_input("Preço Compra", key="upd_pc")
@@ -108,13 +101,21 @@ def dialog_atualizar(prod_id, dados):
     st.text_input("Peso (Kg)", key="upd_peso")
     st.text_input("ICMS Prod (%)", key="upd_icmsp")
     lreal = st.toggle("Lucro Real", value=True, key="upd_lreal")
-    is_imp = st.toggle("Importação Própria", value=(True if dados['importacao_propria'] else False))
+    is_imp = st.toggle("Importação Própria", value=(True if dados.get('importacao_propria') else False))
 
     if st.button("Salvar e Usar", type="primary"):
         res = calcular_custo_aquisicao(st.session_state.upd_pc, st.session_state.upd_fr, st.session_state.upd_ipi, "0", "0", "0", st.session_state.upd_icmsp, lreal)
         
         sql = "UPDATE produtos SET preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf, peso=:peso, importacao_propria=:imp WHERE id=:id"
-        params = {"pp": safe_float(st.session_state.upd_pc), "ipi": safe_float(st.session_state.upd_ipi), "icms": safe_float(st.session_state.upd_icmsp), "pf": res['custo_final'], "peso": safe_float(st.session_state.upd_peso), "imp": is_imp, "id": prod_id}
+        params = {
+            "pp": safe_float(st.session_state.upd_pc), 
+            "ipi": safe_float(st.session_state.upd_ipi), 
+            "icms": safe_float(st.session_state.upd_icmsp), 
+            "pf": res['custo_final'], 
+            "peso": safe_float(st.session_state.upd_peso), 
+            "imp": is_imp, 
+            "id": prod_id
+        }
         run_command(sql, params)
         
         st.session_state.custo_final = res['custo_final']
@@ -128,10 +129,10 @@ def dialog_atualizar(prod_id, dados):
             st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
             st.session_state.sb_origem = "Nacional / Revenda"
             
-        st.toast("Atualizado e Carregado!", icon="✅")
+        st.toast("Atualizado!", icon="✅")
         st.rerun()
 
-@st.dialog("🧪 Simular Compra (Teste)")
+@st.dialog("Simular Compra (Teste)")
 def dialog_simular():
     st.caption("Insira os dados da compra para descobrir o custo final.")
     c1, c2, c3 = st.columns(3)
@@ -151,7 +152,7 @@ def dialog_simular():
     st.metric("Custo Final Estimado", f"R$ {custo_simulado:,.2f}")
     
     col_a, col_b = st.columns(2)
-    if col_a.button("🧪 Testar Venda", use_container_width=True):
+    if col_a.button("Testar Venda", use_container_width=True):
         st.session_state.custo_final = custo_simulado
         st.session_state.sb_peso = f"{peso_s:.3f}"
         if imp_s:
@@ -164,7 +165,7 @@ def dialog_simular():
         st.session_state.draft_cadastro = {'preco_nf': pc, 'frete': fr, 'ipi': ipi, 'icms_prod': icms_p, 'peso': peso_s, 'lreal': lreal_s, 'imp_propria': imp_s}
         st.rerun()
         
-    if col_b.button("➡️ Salvar e Cadastrar", use_container_width=True):
+    if col_b.button("Salvar e Cadastrar", use_container_width=True):
         st.session_state.draft_cadastro = {'preco_nf': pc, 'frete': fr, 'ipi': ipi, 'icms_prod': icms_p, 'peso': peso_s, 'lreal': lreal_s, 'imp_propria': imp_s}
         st.switch_page("views/2_cadastro.py")
 
@@ -176,9 +177,9 @@ with st.sidebar:
     if st.session_state.get('is_simulation'):
         with st.container(border=True):
             st.info("🧪 **MODO SIMULAÇÃO**")
-            if st.button("💾 Cadastrar Item", type="primary", use_container_width=True):
+            if st.button("Cadastrar Item", type="primary", use_container_width=True):
                 st.switch_page("views/2_cadastro.py")
-            if st.button("❌ Limpar"):
+            if st.button("Limpar"):
                 st.session_state.is_simulation = False
                 st.session_state.custo_final = 0.0
                 st.rerun()
@@ -187,29 +188,39 @@ with st.sidebar:
     with tab_est:
         try:
             df_prods = run_query("SELECT * FROM produtos ORDER BY nome")
-            mapa = {f"{r['sku']} - {r['nome']}": r for _, r in df_prods.iterrows()} if not df_prods.empty else {}
-            sel = st.selectbox("Buscar:", ["Selecione..."] + list(mapa.keys()))
-            if sel != "Selecione...":
-                dados = mapa[sel]
-                b1, b2 = st.columns([1,1])
-                if b1.button("⬇️ Carregar", use_container_width=True):
-                    st.session_state.custo_final = float(dados['preco_final'])
-                    if dados['peso']: st.session_state.sb_peso = f"{float(dados['peso']):.3f}"
-                    if dados['icms_percent']: st.session_state.sb_icms = f"{float(dados['icms_percent']):.2f}"
-                    st.session_state.is_simulation = False 
-                    eh_imp = dados.get('importacao_propria', False)
-                    if eh_imp:
-                        st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
-                        st.session_state.sb_origem = "Importação Própria"
-                    else:
-                        st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
-                        st.session_state.sb_origem = "Nacional / Revenda"
-                    st.rerun()
-                if b2.button("✏️ Editar", use_container_width=True):
-                    dialog_atualizar(dados['id'], dados)
-        except: st.error("Erro BD")
+            if not df_prods.empty:
+                mapa = {f"{r['sku']} - {r['nome']}": r for _, r in df_prods.iterrows()}
+                sel = st.selectbox("Buscar:", ["Selecione..."] + list(mapa.keys()))
+                
+                if sel != "Selecione...":
+                    dados = mapa[sel]
+                    b1, b2 = st.columns([1,1])
+                    if b1.button("Carregar", use_container_width=True):
+                        # CORREÇÃO DO ERRO BD: Usamos safe_float para evitar crash com NULL
+                        st.session_state.custo_final = safe_float(dados['preco_final'])
+                        
+                        st.session_state.sb_peso = f"{safe_float(dados['peso']):.3f}"
+                        st.session_state.sb_icms = f"{safe_float(dados['icms_percent']):.2f}"
+                        
+                        st.session_state.is_simulation = False 
+                        eh_imp = dados.get('importacao_propria', False)
+                        if eh_imp:
+                            st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
+                            st.session_state.sb_origem = "Importação Própria"
+                        else:
+                            st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
+                            st.session_state.sb_origem = "Nacional / Revenda"
+                        st.rerun()
+                        
+                    if b2.button("Editar", use_container_width=True):
+                        dialog_atualizar(dados['id'], dados)
+            else:
+                st.warning("Nenhum produto cadastrado.")
+        except Exception as e: 
+            st.error(f"Erro: {e}") # Mostra o erro real se acontecer
+            
     with tab_test:
-        if st.button("🚀 Iniciar Simulação", use_container_width=True):
+        if st.button("Iniciar Simulação", use_container_width=True):
             dialog_simular()
 
     st.divider()
@@ -261,7 +272,6 @@ if "Mercado Livre" in st.session_state.sb_canal:
             val = st.number_input("Preço Venda", 0.0, key="pr_cla")
             res = calcular_cenario(0, str(val), safe_com, "preco", "Mercado Livre", custo, impostos, peso, is_full, 0)
         else:
-            # CORREÇÃO APLICADA AQUI NA PRÁTICA: KEY marg_cla AGORA É FLOAT NO SESSION_STATE
             marg = st.number_input("Margem %", 0.0, key="marg_cla")
             res = calcular_cenario(str(marg), 0, safe_com, "margem", "Mercado Livre", custo, impostos, peso, is_full, 0)
             
