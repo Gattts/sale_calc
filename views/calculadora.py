@@ -12,15 +12,14 @@ defaults = {
     'custo_final': 0.0,
     'sb_regime': 'Lucro Real',
     'sb_origem': 'Nacional / Revenda',
-    'sb_icms': '18.00', 'sb_difal': '0.00',
+    'sb_icms': '12.00', 'sb_difal': '0.00',
     'sb_pis': '1.65', 'sb_cofins': '7.60',
-    'sb_peso': '0.300', 'sb_full': False,
-    'com_cla': '11.5', 
-    'marg_cla': 15.0,  # Float para evitar erro de tipo
+    'sb_peso': '0.000', 'sb_full': False,
+    'com_cla': '11.5', 'marg_cla': 15.0, 
     'pr_cla': 0.0,
-    'com_pre': '16.5', 
-    'marg_pre': 20.0,  # Float para evitar erro de tipo
+    'com_pre': '16.5', 'marg_pre': 20.0, 
     'pr_pre': 0.0,
+    'com_std': '14.0', 'marg_std': 15.0, 'pr_std': 0.0, # Novos defaults para Shopee/Outros
     'upd_pc': '', 'upd_fr': '', 'upd_ipi': '', 'upd_peso': '', 
     'upd_icmsp': '', 'upd_icmsf': '', 'upd_out': '', 'upd_st': '', 'upd_lreal': True,
     'is_simulation': False,
@@ -31,19 +30,18 @@ for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# Garante que margens sejam float (Correção do TypeError anterior)
+# Garante tipos corretos
 try:
     if isinstance(st.session_state.marg_cla, str): st.session_state.marg_cla = float(st.session_state.marg_cla)
     if isinstance(st.session_state.marg_pre, str): st.session_state.marg_pre = float(st.session_state.marg_pre)
-except:
-    st.session_state.marg_cla = 15.0
-    st.session_state.marg_pre = 20.0
+    if isinstance(st.session_state.marg_std, str): st.session_state.marg_std = float(st.session_state.marg_std)
+except: pass
 
 # ==============================================================================
-# 2. FUNÇÕES AUXILIARES
+# 2. FUNÇÕES AUXILIARES (COM PROTEÇÃO CONTRA ERRO BD)
 # ==============================================================================
 def safe_float(valor):
-    """Converte para float de forma segura, aceitando None, string ou número."""
+    """Converte valores do banco (que podem ser None) para float seguro."""
     if valor is None or valor == "": return 0.0
     if isinstance(valor, (float, int)): return float(valor)
     try: return float(str(valor).replace(',', '.'))
@@ -63,7 +61,9 @@ def criar_dre_detalhada(preco_venda, custo_prod, comissao_pct, impostos_dict, fr
     
     # Taxas
     v_comissao = fat * (pc_com / 100)
+    # Taxa fixa apenas se for ML e preço baixo (regra simples)
     v_fixa = 6.00 if ("Mercado Livre" in st.session_state.sb_canal and 0 < fat < 79.00) else 0.00
+    if "Shopee" in st.session_state.sb_canal: v_fixa = 3.00 # Exemplo de taxa fixa Shopee
     
     lucro = fat - (v_icms + v_pis + v_cofins + v_difal) - (v_comissao + v_fixa) - custo_m - frete
     
@@ -103,7 +103,7 @@ def dialog_atualizar(prod_id, dados):
     lreal = st.toggle("Lucro Real", value=True, key="upd_lreal")
     is_imp = st.toggle("Importação Própria", value=(True if dados.get('importacao_propria') else False))
 
-    if st.button("Salvar e Usar", type="primary"):
+    if st.button("Salvar e Usar", type="primary", use_container_width=True):
         res = calcular_custo_aquisicao(st.session_state.upd_pc, st.session_state.upd_fr, st.session_state.upd_ipi, "0", "0", "0", st.session_state.upd_icmsp, lreal)
         
         sql = "UPDATE produtos SET preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf, peso=:peso, importacao_propria=:imp WHERE id=:id"
@@ -196,7 +196,7 @@ with st.sidebar:
                     dados = mapa[sel]
                     b1, b2 = st.columns([1,1])
                     if b1.button("Carregar", use_container_width=True):
-                        # CORREÇÃO DO ERRO BD: Usamos safe_float para evitar crash com NULL
+                        # USANDO SAFE_FLOAT PARA EVITAR ERRO BD
                         st.session_state.custo_final = safe_float(dados['preco_final'])
                         
                         st.session_state.sb_peso = f"{safe_float(dados['peso']):.3f}"
@@ -217,7 +217,7 @@ with st.sidebar:
             else:
                 st.warning("Nenhum produto cadastrado.")
         except Exception as e: 
-            st.error(f"Erro: {e}") # Mostra o erro real se acontecer
+            st.error(f"Erro BD: {e}") 
             
     with tab_test:
         if st.button("Iniciar Simulação", use_container_width=True):
@@ -259,10 +259,11 @@ modo = "margem" if "Margem" in col_mode.radio("Meta:", ["Margem (%)", "Preço (R
 
 st.divider()
 
+# --- LÓGICA DE EXIBIÇÃO POR CANAL ---
 if "Mercado Livre" in st.session_state.sb_canal:
+    # MODO MERCADO LIVRE (2 Colunas)
     c_clas, c_prem = st.columns(2, gap="medium")
     
-    # --- CLÁSSICO ---
     with c_clas:
         st.markdown("### 🔹 Clássico")
         com = st.text_input("Comissão %", key="com_cla")
@@ -279,7 +280,6 @@ if "Mercado Livre" in st.session_state.sb_canal:
         with st.expander("🧾 DRE Detalhado"):
             st.dataframe(criar_dre_detalhada(res['preco'], custo, safe_com, impostos, res['frete']).style.format({"Valor": "R$ {:,.2f}"}).applymap(lambda v: 'color: #ff4b4b' if v < 0 else 'color: #2e7d32; font-weight: bold', subset=['Valor']), hide_index=True)
 
-    # --- PREMIUM ---
     with c_prem:
         st.markdown("### 🔸 Premium")
         com_p = st.text_input("Comissão %", key="com_pre")
@@ -295,5 +295,23 @@ if "Mercado Livre" in st.session_state.sb_canal:
         card_resultado("Premium", res_p)
         with st.expander("🧾 DRE Detalhado"):
             st.dataframe(criar_dre_detalhada(res_p['preco'], custo, safe_com_p, impostos, res_p['frete']).style.format({"Valor": "R$ {:,.2f}"}).applymap(lambda v: 'color: #ff4b4b' if v < 0 else 'color: #2e7d32; font-weight: bold', subset=['Valor']), hide_index=True)
+
 else:
-    st.info("Selecione Mercado Livre para ver os cards.")
+    # MODO OUTROS CANAIS (1 Coluna Centralizada)
+    st.markdown(f"### 🛍️ Venda em: {st.session_state.sb_canal}")
+    c_std, _ = st.columns([1, 1]) # Coluna esquerda para não ficar gigante
+    
+    with c_std:
+        com_s = st.text_input("Comissão do Canal (%)", key="com_std")
+        safe_com_s = com_s if com_s else "0.0"
+        
+        if modo == "preco":
+            val_s = st.number_input("Preço Venda", 0.0, key="pr_std")
+            res_s = calcular_cenario(0, str(val_s), safe_com_s, "preco", st.session_state.sb_canal, custo, impostos, peso, is_full, 0)
+        else:
+            marg_s = st.number_input("Margem Meta %", 0.0, key="marg_std")
+            res_s = calcular_cenario(str(marg_s), 0, safe_com_s, "margem", st.session_state.sb_canal, custo, impostos, peso, is_full, 0)
+
+        card_resultado("Resultado", res_s)
+        with st.expander("🧾 DRE Detalhado"):
+             st.dataframe(criar_dre_detalhada(res_s['preco'], custo, safe_com_s, impostos, res_s['frete']).style.format({"Valor": "R$ {:,.2f}"}).applymap(lambda v: 'color: #ff4b4b' if v < 0 else 'color: #2e7d32; font-weight: bold', subset=['Valor']), hide_index=True)
