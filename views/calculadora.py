@@ -6,26 +6,46 @@ from utils.calculos import calcular_cenario, calcular_custo_aquisicao
 from utils.db import run_query, run_command
 
 # ==============================================================================
-# 1. INICIALIZAÇÃO DE ESTADO
+# 1. INICIALIZAÇÃO DE ESTADO (CORRIGIDA)
 # ==============================================================================
 defaults = {
     'custo_final': 0.0,
     'sb_regime': 'Lucro Real',
     'sb_origem': 'Nacional / Revenda',
-    'sb_icms': '18.00', 'sb_difal': '0.00',
+    'sb_icms': '12.00', 'sb_difal': '15.00',
     'sb_pis': '1.65', 'sb_cofins': '7.60',
-    'sb_peso': '0.300', 'sb_full': False,
-    'com_cla': '11.5', 'marg_cla': '15.0', 'pr_cla': 0.0,
-    'com_pre': '16.5', 'marg_pre': '20.0', 'pr_pre': 0.0,
+    'sb_peso': '0.000', 'sb_full': False,
+    
+    # --- CORREÇÃO AQUI: Margens devem ser FLOAT, Comissões STR (pois usa text_input) ---
+    'com_cla': '11.5', 
+    'marg_cla': 15.0,  # Era '15.0' (texto), agora é 15.0 (número)
+    'pr_cla': 0.0,
+    
+    'com_pre': '16.5', 
+    'marg_pre': 20.0,  # Era '20.0' (texto), agora é 20.0 (número)
+    'pr_pre': 0.0,
+    
     'upd_pc': '', 'upd_fr': '', 'upd_ipi': '', 'upd_peso': '', 
     'upd_icmsp': '', 'upd_icmsf': '', 'upd_out': '', 'upd_st': '', 'upd_lreal': True,
-    'is_simulation': False, # Novo controle de simulação
-    'draft_cadastro': {}    # Memória do rascunho
+    'is_simulation': False,
+    'draft_cadastro': {}
 }
 
+# Aplica os defaults
 for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+# --- PROTEÇÃO CONTRA O ERRO "STR vs FLOAT" ---
+# Se por acaso já existir no cache como string, forçamos a conversão para float agora
+try:
+    if isinstance(st.session_state.marg_cla, str):
+        st.session_state.marg_cla = float(st.session_state.marg_cla)
+    if isinstance(st.session_state.marg_pre, str):
+        st.session_state.marg_pre = float(st.session_state.marg_pre)
+except:
+    st.session_state.marg_cla = 15.0
+    st.session_state.marg_pre = 20.0
 
 # ==============================================================================
 # 2. FUNÇÕES AUXILIARES
@@ -71,8 +91,6 @@ def criar_dre_detalhada(preco_venda, custo_prod, comissao_pct, impostos_dict, fr
 # ==============================================================================
 # 3. MODAIS
 # ==============================================================================
-
-# --- MODAL DE EDIÇÃO (Banco de Dados) ---
 @st.dialog("✏️ Editar Produto")
 def dialog_atualizar(prod_id, dados):
     st.caption(f"Editando: {dados['nome']}")
@@ -101,7 +119,7 @@ def dialog_atualizar(prod_id, dados):
         
         st.session_state.custo_final = res['custo_final']
         st.session_state.sb_peso = st.session_state.upd_peso
-        st.session_state.is_simulation = False # Sai do modo simulação pois carregou do banco
+        st.session_state.is_simulation = False 
         
         if is_imp:
             st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
@@ -113,66 +131,41 @@ def dialog_atualizar(prod_id, dados):
         st.toast("Atualizado e Carregado!", icon="✅")
         st.rerun()
 
-# --- MODAL DE SIMULAÇÃO (TESTE SEM SALVAR) ---
 @st.dialog("🧪 Simular Compra (Teste)")
 def dialog_simular():
     st.caption("Insira os dados da compra para descobrir o custo final.")
-    
     c1, c2, c3 = st.columns(3)
     pc = c1.number_input("Preço Compra (R$)", min_value=0.0, step=1.0)
     fr = c2.number_input("Frete Compra (R$)", min_value=0.0, step=1.0)
     ipi = c3.number_input("IPI (%)", min_value=0.0, step=0.1)
-    
     c4, c5 = st.columns(2)
     icms_p = c4.number_input("ICMS Prod (%)", min_value=0.0, step=0.1)
     peso_s = c5.number_input("Peso Estimado (Kg)", min_value=0.0, format="%.3f")
-    
     c6, c7 = st.columns(2)
     lreal_s = c6.toggle("Lucro Real (Entrada)", value=True)
     imp_s = c7.toggle("Importação Própria", value=False)
     
     st.divider()
-    
-    # Cálculo em Tempo Real
     res = calcular_custo_aquisicao(pc, fr, ipi, 0, 0, 0, icms_p, lreal_s)
     custo_simulado = res['custo_final']
     st.metric("Custo Final Estimado", f"R$ {custo_simulado:,.2f}")
     
-    st.caption("O que você deseja fazer?")
     col_a, col_b = st.columns(2)
-    
-    # OPÇÃO A: TESTAR NA CALCULADORA (SEM SALVAR NO BANCO)
-    if col_a.button("🧪 Testar Venda (Sem Salvar)", use_container_width=True):
-        # 1. Atualiza a calculadora principal
+    if col_a.button("🧪 Testar Venda", use_container_width=True):
         st.session_state.custo_final = custo_simulado
         st.session_state.sb_peso = f"{peso_s:.3f}"
-        
-        # 2. Configura taxas baseado na origem simulada
         if imp_s:
             st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
             st.session_state.sb_origem = "Importação Própria"
         else:
             st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
             st.session_state.sb_origem = "Nacional / Revenda"
-            
-        # 3. Ativa MODO SIMULAÇÃO e guarda RASCUNHO na memória
         st.session_state.is_simulation = True
-        st.session_state.draft_cadastro = {
-            'preco_nf': pc, 'frete': fr, 'ipi': ipi,
-            'icms_prod': icms_p, 'peso': peso_s, 
-            'lreal': lreal_s, 'imp_propria': imp_s
-        }
-        
-        st.toast("Dados simulados carregados! Verifique o lucro.", icon="🧪")
+        st.session_state.draft_cadastro = {'preco_nf': pc, 'frete': fr, 'ipi': ipi, 'icms_prod': icms_p, 'peso': peso_s, 'lreal': lreal_s, 'imp_propria': imp_s}
         st.rerun()
         
-    # OPÇÃO B: JÁ LEVAR PARA CADASTRO
     if col_b.button("➡️ Salvar e Cadastrar", use_container_width=True):
-        st.session_state.draft_cadastro = {
-            'preco_nf': pc, 'frete': fr, 'ipi': ipi,
-            'icms_prod': icms_p, 'peso': peso_s, 
-            'lreal': lreal_s, 'imp_propria': imp_s
-        }
+        st.session_state.draft_cadastro = {'preco_nf': pc, 'frete': fr, 'ipi': ipi, 'icms_prod': icms_p, 'peso': peso_s, 'lreal': lreal_s, 'imp_propria': imp_s}
         st.switch_page("views/2_cadastro.py")
 
 # ==============================================================================
@@ -180,27 +173,22 @@ def dialog_simular():
 # ==============================================================================
 with st.sidebar:
     st.header("🛒 Produto & Config")
-    
-    # ABA INTELIGENTE: Se estiver em simulação, avisa.
     if st.session_state.get('is_simulation'):
         with st.container(border=True):
             st.info("🧪 **MODO SIMULAÇÃO**")
-            st.caption("Você está testando um custo provisório.")
-            if st.button("💾 Transformar em Cadastro Real", type="primary", use_container_width=True):
+            if st.button("💾 Cadastrar Item", type="primary", use_container_width=True):
                 st.switch_page("views/2_cadastro.py")
-            if st.button("❌ Limpar Simulação"):
+            if st.button("❌ Limpar"):
                 st.session_state.is_simulation = False
                 st.session_state.custo_final = 0.0
                 st.rerun()
     
     tab_est, tab_test = st.tabs(["📦 Estoque", "🧪 Novo Teste"])
-    
     with tab_est:
         try:
             df_prods = run_query("SELECT * FROM produtos ORDER BY nome")
             mapa = {f"{r['sku']} - {r['nome']}": r for _, r in df_prods.iterrows()} if not df_prods.empty else {}
             sel = st.selectbox("Buscar:", ["Selecione..."] + list(mapa.keys()))
-            
             if sel != "Selecione...":
                 dados = mapa[sel]
                 b1, b2 = st.columns([1,1])
@@ -208,9 +196,7 @@ with st.sidebar:
                     st.session_state.custo_final = float(dados['preco_final'])
                     if dados['peso']: st.session_state.sb_peso = f"{float(dados['peso']):.3f}"
                     if dados['icms_percent']: st.session_state.sb_icms = f"{float(dados['icms_percent']):.2f}"
-                    
-                    st.session_state.is_simulation = False # Reseta simulação pois carregou real
-                    
+                    st.session_state.is_simulation = False 
                     eh_imp = dados.get('importacao_propria', False)
                     if eh_imp:
                         st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
@@ -219,27 +205,22 @@ with st.sidebar:
                         st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
                         st.session_state.sb_origem = "Nacional / Revenda"
                     st.rerun()
-
                 if b2.button("✏️ Editar", use_container_width=True):
                     dialog_atualizar(dados['id'], dados)
         except: st.error("Erro BD")
-        
     with tab_test:
         if st.button("🚀 Iniciar Simulação", use_container_width=True):
             dialog_simular()
 
     st.divider()
-    
     st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"], key="sb_canal")
     st.selectbox("Origem", ["Nacional / Revenda", "Importação Própria"], key="sb_origem", disabled=True) 
-    
     c1, c2 = st.columns(2)
     st.text_input("ICMS (%)", key="sb_icms")
     st.text_input("DIFAL (%)", key="sb_difal")
     c3, c4 = st.columns(2)
     st.text_input("PIS (%)", key="sb_pis")
     st.text_input("COFINS (%)", key="sb_cofins")
-    
     st.text_input("Peso (Kg)", key="sb_peso")
     st.toggle("⚡ Full", key="sb_full")
     
@@ -280,6 +261,7 @@ if "Mercado Livre" in st.session_state.sb_canal:
             val = st.number_input("Preço Venda", 0.0, key="pr_cla")
             res = calcular_cenario(0, str(val), safe_com, "preco", "Mercado Livre", custo, impostos, peso, is_full, 0)
         else:
+            # CORREÇÃO APLICADA AQUI NA PRÁTICA: KEY marg_cla AGORA É FLOAT NO SESSION_STATE
             marg = st.number_input("Margem %", 0.0, key="marg_cla")
             res = calcular_cenario(str(marg), 0, safe_com, "margem", "Mercado Livre", custo, impostos, peso, is_full, 0)
             
