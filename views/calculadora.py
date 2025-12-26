@@ -12,14 +12,15 @@ defaults = {
     'custo_final': 0.0,
     'sb_regime': 'Lucro Real',
     'sb_origem': 'Nacional / Revenda',
-    'sb_icms': '12.00', 'sb_difal': '0.00',
+    'sb_canal': '🟡 Mercado Livre', # Adicionado ao default para segurança
+    'sb_icms': '18.00', 'sb_difal': '0.00',
     'sb_pis': '1.65', 'sb_cofins': '7.60',
-    'sb_peso': '0.000', 'sb_full': False,
+    'sb_peso': '0.300', 'sb_full': False,
     'com_cla': '11.5', 'marg_cla': 15.0, 
     'pr_cla': 0.0,
     'com_pre': '16.5', 'marg_pre': 20.0, 
     'pr_pre': 0.0,
-    'com_std': '14.0', 'marg_std': 15.0, 'pr_std': 0.0, # Novos defaults para Shopee/Outros
+    'com_std': '14.0', 'marg_std': 15.0, 'pr_std': 0.0,
     'upd_pc': '', 'upd_fr': '', 'upd_ipi': '', 'upd_peso': '', 
     'upd_icmsp': '', 'upd_icmsf': '', 'upd_out': '', 'upd_st': '', 'upd_lreal': True,
     'is_simulation': False,
@@ -38,10 +39,9 @@ try:
 except: pass
 
 # ==============================================================================
-# 2. FUNÇÕES AUXILIARES (COM PROTEÇÃO CONTRA ERRO BD)
+# 2. FUNÇÕES AUXILIARES
 # ==============================================================================
 def safe_float(valor):
-    """Converte valores do banco (que podem ser None) para float seguro."""
     if valor is None or valor == "": return 0.0
     if isinstance(valor, (float, int)): return float(valor)
     try: return float(str(valor).replace(',', '.'))
@@ -61,9 +61,13 @@ def criar_dre_detalhada(preco_venda, custo_prod, comissao_pct, impostos_dict, fr
     
     # Taxas
     v_comissao = fat * (pc_com / 100)
-    # Taxa fixa apenas se for ML e preço baixo (regra simples)
-    v_fixa = 6.00 if ("Mercado Livre" in st.session_state.sb_canal and 0 < fat < 79.00) else 0.00
-    if "Shopee" in st.session_state.sb_canal: v_fixa = 3.00 # Exemplo de taxa fixa Shopee
+    v_fixa = 0.0
+    # Taxa fixa ML
+    if "Mercado Livre" in st.session_state.sb_canal and 0 < fat < 79.00:
+        v_fixa = 6.00 
+    # Taxa fixa Shopee (Exemplo: 3 reais se for o caso, ajustável)
+    if "Shopee" in st.session_state.sb_canal: 
+        v_fixa = 3.00 
     
     lucro = fat - (v_icms + v_pis + v_cofins + v_difal) - (v_comissao + v_fixa) - custo_m - frete
     
@@ -103,7 +107,7 @@ def dialog_atualizar(prod_id, dados):
     lreal = st.toggle("Lucro Real", value=True, key="upd_lreal")
     is_imp = st.toggle("Importação Própria", value=(True if dados.get('importacao_propria') else False))
 
-    if st.button("Salvar e Usar", type="primary", use_container_width=True):
+    if st.button("Salvar e Usar", type="primary"):
         res = calcular_custo_aquisicao(st.session_state.upd_pc, st.session_state.upd_fr, st.session_state.upd_ipi, "0", "0", "0", st.session_state.upd_icmsp, lreal)
         
         sql = "UPDATE produtos SET preco_partida=:pp, ipi_percent=:ipi, icms_percent=:icms, preco_final=:pf, peso=:peso, importacao_propria=:imp WHERE id=:id"
@@ -134,7 +138,7 @@ def dialog_atualizar(prod_id, dados):
 
 @st.dialog("Simular Compra (Teste)")
 def dialog_simular():
-    st.caption("Insira os dados da compra para descobrir o custo final.")
+    st.caption("Simule custo e impostos.")
     c1, c2, c3 = st.columns(3)
     pc = c1.number_input("Preço Compra (R$)", min_value=0.0, step=1.0)
     fr = c2.number_input("Frete Compra (R$)", min_value=0.0, step=1.0)
@@ -170,10 +174,29 @@ def dialog_simular():
         st.switch_page("views/2_cadastro.py")
 
 # ==============================================================================
-# 4. SIDEBAR
+# 4. SIDEBAR (REORGANIZADA: CONFIGURAÇÕES NO TOPO)
 # ==============================================================================
 with st.sidebar:
-    st.header("🛒 Produto & Config")
+    st.header("⚙️ Configurações de Venda")
+    
+    # --- BLOCO 1: CANAL E IMPOSTOS (Lido ANTES do botão carregar) ---
+    st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"], key="sb_canal")
+    
+    # Origem e Impostos
+    st.selectbox("Origem", ["Nacional / Revenda", "Importação Própria"], key="sb_origem", disabled=True) 
+    
+    c1, c2 = st.columns(2)
+    st.text_input("ICMS (%)", key="sb_icms")
+    st.text_input("DIFAL (%)", key="sb_difal")
+    c3, c4 = st.columns(2)
+    st.text_input("PIS (%)", key="sb_pis")
+    st.text_input("COFINS (%)", key="sb_cofins")
+    
+    st.divider()
+
+    # --- BLOCO 2: CARREGAR PRODUTO ---
+    st.header("📦 Produto")
+    
     if st.session_state.get('is_simulation'):
         with st.container(border=True):
             st.info("🧪 **MODO SIMULAÇÃO**")
@@ -185,6 +208,7 @@ with st.sidebar:
                 st.rerun()
     
     tab_est, tab_test = st.tabs(["📦 Estoque", "🧪 Novo Teste"])
+    
     with tab_est:
         try:
             df_prods = run_query("SELECT * FROM produtos ORDER BY nome")
@@ -196,13 +220,12 @@ with st.sidebar:
                     dados = mapa[sel]
                     b1, b2 = st.columns([1,1])
                     if b1.button("Carregar", use_container_width=True):
-                        # USANDO SAFE_FLOAT PARA EVITAR ERRO BD
+                        # Carrega dados do produto
                         st.session_state.custo_final = safe_float(dados['preco_final'])
-                        
                         st.session_state.sb_peso = f"{safe_float(dados['peso']):.3f}"
                         st.session_state.sb_icms = f"{safe_float(dados['icms_percent']):.2f}"
-                        
                         st.session_state.is_simulation = False 
+                        
                         eh_imp = dados.get('importacao_propria', False)
                         if eh_imp:
                             st.session_state.sb_pis, st.session_state.sb_cofins = "2.10", "9.65"
@@ -210,6 +233,8 @@ with st.sidebar:
                         else:
                             st.session_state.sb_pis, st.session_state.sb_cofins = "1.65", "7.60"
                             st.session_state.sb_origem = "Nacional / Revenda"
+                        
+                        # Rerun para atualizar a tela com os novos custos
                         st.rerun()
                         
                     if b2.button("Editar", use_container_width=True):
@@ -223,18 +248,12 @@ with st.sidebar:
         if st.button("Iniciar Simulação", use_container_width=True):
             dialog_simular()
 
+    # --- BLOCO 3: LOGÍSTICA ---
     st.divider()
-    st.selectbox("Canal", ["🟡 Mercado Livre", "🟠 Shopee", "🔵 Amazon", "🌐 Site Próprio"], key="sb_canal")
-    st.selectbox("Origem", ["Nacional / Revenda", "Importação Própria"], key="sb_origem", disabled=True) 
-    c1, c2 = st.columns(2)
-    st.text_input("ICMS (%)", key="sb_icms")
-    st.text_input("DIFAL (%)", key="sb_difal")
-    c3, c4 = st.columns(2)
-    st.text_input("PIS (%)", key="sb_pis")
-    st.text_input("COFINS (%)", key="sb_cofins")
     st.text_input("Peso (Kg)", key="sb_peso")
     st.toggle("⚡ Full", key="sb_full")
     
+    # Feedback Visual
     if st.session_state.custo_final > 0:
         val = st.session_state.custo_final
         if st.session_state.get('is_simulation'):
@@ -299,7 +318,7 @@ if "Mercado Livre" in st.session_state.sb_canal:
 else:
     # MODO OUTROS CANAIS (1 Coluna Centralizada)
     st.markdown(f"### 🛍️ Venda em: {st.session_state.sb_canal}")
-    c_std, _ = st.columns([1, 1]) # Coluna esquerda para não ficar gigante
+    c_std, _ = st.columns([1, 1]) 
     
     with c_std:
         com_s = st.text_input("Comissão do Canal (%)", key="com_std")
